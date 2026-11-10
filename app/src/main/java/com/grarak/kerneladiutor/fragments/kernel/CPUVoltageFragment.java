@@ -33,12 +33,18 @@ import com.grarak.kerneladiutor.fragments.ApplyOnBootFragment;
 import com.grarak.kerneladiutor.fragments.BaseFragment;
 import com.grarak.kerneladiutor.fragments.recyclerview.RecyclerViewFragment;
 import com.grarak.kerneladiutor.utils.Utils;
+import com.grarak.kerneladiutor.utils.kernel.cpu.SuezDVFS;
 import com.grarak.kerneladiutor.utils.kernel.cpuvoltage.Voltage;
+import com.grarak.kerneladiutor.views.recyclerview.CardView;
+import com.grarak.kerneladiutor.views.recyclerview.DescriptionView;
 import com.grarak.kerneladiutor.views.recyclerview.GenericSelectView;
 import com.grarak.kerneladiutor.views.recyclerview.RecyclerViewItem;
+import com.grarak.kerneladiutor.views.recyclerview.SelectView;
 import com.grarak.kerneladiutor.views.recyclerview.SwitchView;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -47,11 +53,27 @@ import java.util.List;
 public class CPUVoltageFragment extends RecyclerViewFragment {
 
     private Voltage mVoltage;
+    private boolean mSuezVoltage;
 
     private List<GenericSelectView> mVoltages = new ArrayList<>();
+    private List<SuezVoltageView> mSuezVoltageViews = new ArrayList<>();
+
+    private static class SuezVoltageView {
+        private final SelectView mView;
+        private final SuezDVFS.OppVoltage mVoltage;
+
+        private SuezVoltageView(SelectView view, SuezDVFS.OppVoltage voltage) {
+            mView = view;
+            mVoltage = voltage;
+        }
+    }
 
     @Override
     public int getSpanCount() {
+        if (SuezDVFS.hasOppVoltageControl()) {
+            /* Keep LITTLE and big OPP cards in their own fixed columns. */
+            return 2;
+        }
         return super.getSpanCount() + 2;
     }
 
@@ -60,13 +82,37 @@ public class CPUVoltageFragment extends RecyclerViewFragment {
         super.init();
 
         mVoltage = Voltage.getInstance();
+        mSuezVoltage = SuezDVFS.hasOppVoltageControl();
         addViewPagerFragment(ApplyOnBootFragment.newInstance(this));
-        addViewPagerFragment(GlobalOffsetFragment.newInstance(this));
+        if (!mSuezVoltage) {
+            addViewPagerFragment(GlobalOffsetFragment.newInstance(this));
+        }
     }
 
     @Override
     protected void addItems(List<RecyclerViewItem> items) {
         mVoltages.clear();
+        mSuezVoltageViews.clear();
+
+        if (mSuezVoltage) {
+            DescriptionView reset = new DescriptionView();
+            reset.setTitle("Restore all stock voltages");
+            reset.setSummary("Resets every LITTLE and big OPP to its vendor default.");
+            reset.setFullSpan(true);
+            reset.setOnItemClickListener(item -> {
+                resetSuezVoltages(0);
+                resetSuezVoltages(2);
+                /* Keep the populated cards in place. Clearing/reloading this
+                 * grid races the asynchronous root writes and can leave a
+                 * blank page. */
+                resetVisibleSuezVoltageViews();
+            });
+            items.add(reset);
+            addSuezLiveRailReadback(items);
+            addSuezVoltageItems(items, 0, "LITTLE");
+            addSuezVoltageItems(items, 2, "big");
+            return;
+        }
 
         if (mVoltage.hasOverrideVmin()) {
             SwitchView overrideVmin = new SwitchView();
@@ -90,6 +136,81 @@ public class CPUVoltageFragment extends RecyclerViewFragment {
             }
         }
         items.addAll(mVoltages);
+    }
+
+    private void addSuezVoltageItems(List<RecyclerViewItem> items, final int cpu,
+                                     String cluster) {
+        CardView card = new CardView();
+        card.setTitle(cluster + " OPP voltage");
+        List<SuezDVFS.OppVoltage> voltages = SuezDVFS.getOppVoltages(cpu);
+        Collections.sort(voltages, new Comparator<SuezDVFS.OppVoltage>() {
+            @Override
+            public int compare(SuezDVFS.OppVoltage left, SuezDVFS.OppVoltage right) {
+                return right.getFrequency() - left.getFrequency();
+            }
+        });
+
+        for (final SuezDVFS.OppVoltage voltage : voltages) {
+            SelectView view = new SelectView();
+            List<String> choices = SuezDVFS.getVoltageChoices(voltage);
+            view.setTitle(cluster + " " + (voltage.getFrequency() / 1000)
+                    + getString(R.string.mhz));
+            view.setSummary(suezVoltageSummary(voltage, voltage.getAssignedMillivolts()));
+            view.setItems(choices);
+            /* Match the item's raw value so SelectView can reopen at it. */
+            view.setItem(String.valueOf(voltage.getAssignedMillivolts()));
+            view.setOnItemSelected((selectView, position, item) -> {
+                int millivolts = Utils.strToInt(item);
+                selectView.setSummary(suezVoltageSummary(voltage, millivolts));
+                SuezDVFS.setOppVoltage(cpu, voltage, millivolts,
+                        ApplyOnBootFragment.CPU_VOLTAGE, getActivity());
+            });
+            mSuezVoltageViews.add(new SuezVoltageView(view, voltage));
+            card.addItem(view);
+        }
+        items.add(card);
+    }
+
+    private void resetSuezVoltages(int cpu) {
+        for (SuezDVFS.OppVoltage voltage : SuezDVFS.getOppVoltages(cpu)) {
+            SuezDVFS.resetOppVoltage(cpu, voltage, ApplyOnBootFragment.CPU_VOLTAGE,
+                    getActivity());
+        }
+    }
+
+    private void addSuezLiveRailReadback(List<RecyclerViewItem> items) {
+        List<SuezDVFS.OppVoltage> little = SuezDVFS.getOppVoltages(0);
+        List<SuezDVFS.OppVoltage> big = SuezDVFS.getOppVoltages(2);
+        if (little.isEmpty() || big.isEmpty()) return;
+
+        SuezDVFS.OppVoltage littleLive = little.get(0);
+        SuezDVFS.OppVoltage bigLive = big.get(0);
+        DescriptionView rails = new DescriptionView();
+        rails.setTitle("Live rail readback");
+        rails.setSummary("LITTLE VPROC " + littleLive.getLiveVprocMillivolts()
+                + getString(R.string.mv) + " · big VPROC "
+                + bigLive.getLiveVprocMillivolts() + getString(R.string.mv)
+                + " · big VSRAM " + bigLive.getLiveVsramMillivolts()
+                + getString(R.string.mv));
+        rails.setFullSpan(true);
+        items.add(rails);
+    }
+
+    private void resetVisibleSuezVoltageViews() {
+        for (SuezVoltageView voltageView : mSuezVoltageViews) {
+            int stock = voltageView.mVoltage.getStockMillivolts();
+            voltageView.mView.setItem(String.valueOf(stock));
+            voltageView.mView.setSummary(suezVoltageSummary(voltageView.mVoltage, stock));
+        }
+    }
+
+    private String suezVoltageSummary(SuezDVFS.OppVoltage voltage, int assignedMillivolts) {
+        String summary = "Stock " + voltage.getStockMillivolts() + getString(R.string.mv);
+        if (assignedMillivolts != voltage.getStockMillivolts()) {
+            summary += " · selected " + assignedMillivolts + getString(R.string.mv);
+        }
+        summary += " · inactive OPPs apply on their next transition";
+        return summary;
     }
 
     private void reload() {

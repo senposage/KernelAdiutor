@@ -42,6 +42,7 @@ import com.grarak.kerneladiutor.utils.NotificationId;
 import com.grarak.kerneladiutor.utils.Utils;
 import com.grarak.kerneladiutor.utils.kernel.cpu.CPUFreq;
 import com.grarak.kerneladiutor.utils.kernel.cpu.MSMPerformance;
+import com.grarak.kerneladiutor.utils.kernel.cpu.SuezDVFS;
 import com.grarak.kerneladiutor.utils.kernel.cpuhotplug.CoreCtl;
 import com.grarak.kerneladiutor.utils.kernel.cpuhotplug.MPDecision;
 import com.grarak.kerneladiutor.utils.root.Control;
@@ -201,6 +202,15 @@ public class ApplyOnBoot {
                     String id = item.getId();
                     CPUFreq.ApplyCpu applyCpu;
                     if (mCategoryEnabled.get(category)) {
+                        /* Old generic CPU entries may contain a per-core
+                         * policy action.  On suez that helper toggles CPU
+                         * online state while restoring a value, which is not
+                         * safe with MTK HPS.  New suez entries are direct
+                         * per-cluster settings and do not use this format. */
+                        if (SuezDVFS.supported() && category.equals(ApplyOnBootFragment.CPU)
+                                && setting.startsWith("#")) {
+                            continue;
+                        }
                         if (category.equals(ApplyOnBootFragment.CPU)
                                 && id.contains("%d")
                                 && setting.startsWith("#")

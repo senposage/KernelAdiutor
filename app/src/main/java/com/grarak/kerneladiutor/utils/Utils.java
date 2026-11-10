@@ -75,7 +75,8 @@ import java.util.Random;
 public class Utils {
 
     private static final String TAG = Utils.class.getSimpleName();
-    public static boolean DONATED = BuildConfig.DEBUG;
+    /* This locally built variant does not have a separate donation SKU. */
+    public static final boolean DONATED = true;
     public static boolean DARK_THEME;
 
     public static void startService(Context context, Intent intent) {

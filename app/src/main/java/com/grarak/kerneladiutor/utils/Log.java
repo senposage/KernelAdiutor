@@ -19,8 +19,6 @@
  */
 package com.grarak.kerneladiutor.utils;
 
-import com.crashlytics.android.Crashlytics;
-import com.grarak.kerneladiutor.BuildConfig;
 
 /**
  * Created by willi on 22.03.18.
@@ -39,19 +37,11 @@ public class Log {
     }
 
     public static void crashlyticsI(String tag, String message) {
-        if (BuildConfig.DEBUG) {
-            android.util.Log.i(TAG, getMessage(tag, message));
-        } else {
-            Crashlytics.log(android.util.Log.INFO, TAG, getMessage(tag, message));
-        }
+        android.util.Log.i(TAG, getMessage(tag, message));
     }
 
     public static void crashlyticsE(String tag, String message) {
-        if (BuildConfig.DEBUG) {
-            android.util.Log.e(TAG, getMessage(tag, message));
-        } else {
-            Crashlytics.log(android.util.Log.ERROR, TAG, getMessage(tag, message));
-        }
+        android.util.Log.e(TAG, getMessage(tag, message));
     }
 
     private static String getMessage(String tag, String message) {

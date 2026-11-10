@@ -14,6 +14,7 @@ import android.util.SparseArray;
 
 import com.grarak.kerneladiutor.utils.Utils;
 import com.grarak.kerneladiutor.utils.kernel.cpu.CPUFreq;
+import com.grarak.kerneladiutor.utils.kernel.cpu.SuezDVFS;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -169,25 +170,41 @@ public class CpuStateMonitor {
 
         mStates.clear();
         try {
+            /* HPS can move the BIG cpufreq policy from cpu2 to cpu3.  Read
+             * residency from the live policy rather than the fixed logical
+             * cluster representative used by the UI. */
+            int statsCore = SuezDVFS.supported() ? SuezDVFS.getStatsCpu(mCore) : mCore;
             String file;
-            if (Utils.existFile(Utils.strFormat(CPUFreq.TIME_STATE, mCore))) {
-                file = Utils.strFormat(CPUFreq.TIME_STATE, mCore);
+            if (Utils.existFile(Utils.strFormat(CPUFreq.TIME_STATE, statsCore))) {
+                file = Utils.strFormat(CPUFreq.TIME_STATE, statsCore);
             } else {
-                file = Utils.strFormat(CPUFreq.TIME_STATE_2, mCore);
+                file = Utils.strFormat(CPUFreq.TIME_STATE_2, statsCore);
             }
-            boolean offline = cpuFreq.isOffline(mCore);
+            boolean offline = !SuezDVFS.supported() && cpuFreq.isOffline(statsCore);
             if (offline) {
-                cpuFreq.onlineCpu(mCore, true, false, null);
+                cpuFreq.onlineCpu(statsCore, true, false, null);
             }
             String states = Utils.readFile(file);
             if (offline) {
-                cpuFreq.onlineCpu(mCore, false, false, null);
+                cpuFreq.onlineCpu(statsCore, false, false, null);
             }
-            if (states.isEmpty()) {
+            if (states == null || states.trim().isEmpty()) {
                 throw new CpuStateMonitorException("Problem opening time-in-states file");
             }
             readInStates(states.split("\\r?\\n"));
         } catch (Exception e) {
+            /* A parked MTK cluster deliberately has no cpufreq policy sysfs.
+             * Keep its full OPP table visible with zero residency instead of
+             * falsely reporting that the frequency table cannot be loaded. */
+            if (SuezDVFS.supported() && SuezDVFS.hasOppVoltageControl()) {
+                for (SuezDVFS.OppVoltage opp : SuezDVFS.getOppVoltages(mCore)) {
+                    mStates.add(new CpuState(opp.getFrequency(), 0));
+                }
+                if (!mStates.isEmpty()) {
+                    Collections.sort(mStates, Collections.reverseOrder());
+                    return;
+                }
+            }
             throw new CpuStateMonitorException("Problem opening time-in-states file");
         }
 

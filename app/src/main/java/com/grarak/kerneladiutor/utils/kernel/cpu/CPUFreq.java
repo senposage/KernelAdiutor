@@ -95,6 +95,9 @@ public class CPUFreq {
     }
 
     public String getGovernorTunablesPath(int cpu, String governor) {
+        if (SuezDVFS.supported()) {
+            return SuezDVFS.getGovernorTunablesPath(cpu, governor);
+        }
         if (Utils.existFile(Utils.strFormat(CPU_GOVERNOR_TUNABLES_CORE, cpu, governor))) {
             return CPU_GOVERNOR_TUNABLES_CORE.replace("%s", governor);
         } else {
@@ -296,6 +299,10 @@ public class CPUFreq {
     }
 
     public void setGovernor(String governor, int min, int max, Context context) {
+        if (SuezDVFS.supported()) {
+            SuezDVFS.setGovernor(min, governor, ApplyOnBootFragment.CPU, context);
+            return;
+        }
         applyCpu(CPU_SCALING_GOVERNOR, governor, min, max, context);
     }
 
@@ -304,6 +311,9 @@ public class CPUFreq {
     }
 
     public String getGovernor(int cpu, boolean forceRead) {
+        if (SuezDVFS.supported()) {
+            return SuezDVFS.getGovernor(cpu);
+        }
         boolean offline = forceRead && isOffline(cpu);
         if (offline) {
             onlineCpu(cpu, true, false, null);
@@ -352,6 +362,14 @@ public class CPUFreq {
         return Arrays.asList(sGovernors);
     }
 
+    public List<String> getGovernors(int cpu) {
+        if (!SuezDVFS.supported()) return getGovernors();
+        String value = Utils.readFile(Utils.strFormat(CPU_AVAILABLE_GOVERNORS,
+                SuezDVFS.getPolicyCpu(cpu)));
+        if (value == null || value.trim().isEmpty()) return getGovernors();
+        return Arrays.asList(value.trim().split("\\s+"));
+    }
+
     private int getFreq(int cpu, String path, boolean forceRead) {
         boolean offline = forceRead && isOffline(cpu);
         if (offline) {
@@ -395,6 +413,14 @@ public class CPUFreq {
     }
 
     public void setMinFreq(int freq, int min, int max, Context context) {
+        if (SuezDVFS.supported()) {
+            int maxFreq = getMaxFreq(min, false);
+            if (maxFreq != 0 && freq > maxFreq) {
+                setMaxFreq(freq, min, max, context);
+            }
+            SuezDVFS.setMinFreq(min, freq, ApplyOnBootFragment.CPU, context);
+            return;
+        }
         MSMPerformance msmPerformance = MSMPerformance.getInstance();
         int maxFreq = getMaxFreq(min, false);
 
@@ -417,10 +443,22 @@ public class CPUFreq {
     }
 
     public int getMinFreq(int cpu, boolean forceRead) {
+        if (SuezDVFS.supported()) {
+            return SuezDVFS.getMinFreq(cpu);
+        }
         return getFreq(cpu, CPU_MIN_FREQ, forceRead);
     }
 
     public void setMaxFreq(int freq, int min, int max, Context context) {
+        if (SuezDVFS.supported()) {
+            int minFreq = getMinFreq(min, false);
+            if (minFreq != 0 && freq < minFreq) {
+                setMinFreq(freq, min, max, context);
+            }
+            String path = SuezDVFS.getMaxPath(min);
+            SuezDVFS.setMaxFreq(min, freq, ApplyOnBootFragment.CPU, path, context);
+            return;
+        }
         MSMPerformance msmPerformance = MSMPerformance.getInstance();
 
         if (Utils.existFile(CPU_MSM_CPUFREQ_LIMIT) && freq > Utils.strToInt(Utils.readFile(CPU_MSM_CPUFREQ_LIMIT))) {
@@ -456,6 +494,9 @@ public class CPUFreq {
     }
 
     public int getMaxFreq(int cpu, boolean forceRead) {
+        if (SuezDVFS.supported()) {
+            return SuezDVFS.getMaxFreq(cpu);
+        }
         if (Utils.existFile(Utils.strFormat(CPU_MAX_FREQ_KT, cpu))) {
             return getFreq(cpu, CPU_MAX_FREQ_KT, forceRead);
         } else {
@@ -539,6 +580,9 @@ public class CPUFreq {
     }
 
     public int getCurFreq(int cpu) {
+        if (SuezDVFS.supported()) {
+            return SuezDVFS.getCurrentFreq(cpu);
+        }
         if (Utils.existFile(Utils.strFormat(CUR_FREQ, cpu))) {
             String value = Utils.readFile(Utils.strFormat(CUR_FREQ, cpu));
             if (value != null) {
@@ -554,6 +598,9 @@ public class CPUFreq {
 
     public void onlineCpu(int cpu, boolean online, String category, boolean onlineSys,
                           Context context) {
+        if (SuezDVFS.supported()) {
+            return;
+        }
         CoreCtl coreCtl = CoreCtl.getInstance();
         MSMPerformance msmPerformance = MSMPerformance.getInstance();
         if (!onlineSys) {
@@ -625,6 +672,11 @@ public class CPUFreq {
 
     public boolean isBigLITTLE() {
         if (mBigCpu == -1 || mLITTLECpu == -1) {
+            if (SuezDVFS.supported()) {
+                mBigCpu = 2;
+                mLITTLECpu = 0;
+                return true;
+            }
             if (getCpuCount() <= 4 && !is8996()
                     || (Device.getBoard().startsWith("mt6") && !Device.getBoard().startsWith("mt6595"))
                     || Device.getBoard().startsWith("msm8929")) return false;

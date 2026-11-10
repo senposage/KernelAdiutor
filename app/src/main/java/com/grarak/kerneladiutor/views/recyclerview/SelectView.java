@@ -20,6 +20,7 @@
 package com.grarak.kerneladiutor.views.recyclerview;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Context;
 import android.view.View;
 
@@ -81,6 +82,7 @@ public class SelectView extends ValueView {
 
     private void showDialog(Context context) {
         String[] items = mItems.toArray(new String[mItems.size()]);
+        final int selected = mItems.indexOf(getValue());
 
         mDialog = new Dialog(context).setItems(items,
                 (dialog, which) -> {
@@ -93,7 +95,12 @@ public class SelectView extends ValueView {
         if (getTitle() != null) {
             mDialog.setTitle(getTitle());
         }
-        mDialog.show();
+        AlertDialog dialog = mDialog.show();
+        if (selected >= 0 && dialog.getListView() != null) {
+            /* Long numeric lists should reopen around the current choice. */
+            dialog.getListView().post(() -> dialog.getListView().setSelectionFromTop(selected,
+                    dialog.getListView().getHeight() / 2));
+        }
     }
 
     @Override

@@ -89,6 +89,7 @@ import com.grarak.kerneladiutor.utils.ViewUtils;
 import com.grarak.kerneladiutor.utils.WebpageReader;
 import com.grarak.kerneladiutor.utils.kernel.battery.Battery;
 import com.grarak.kerneladiutor.utils.kernel.cpuhotplug.Hotplug;
+import com.grarak.kerneladiutor.utils.kernel.cpu.SuezDVFS;
 import com.grarak.kerneladiutor.utils.kernel.cpuvoltage.Voltage;
 import com.grarak.kerneladiutor.utils.kernel.entropy.Entropy;
 import com.grarak.kerneladiutor.utils.kernel.gpu.GPU;
@@ -188,7 +189,7 @@ public class NavigationActivity extends BaseActivity
         }
         mFragments.add(new NavigationActivity.NavigationFragment(R.string.kernel));
         mFragments.add(new NavigationActivity.NavigationFragment(R.string.cpu, CPUFragment.class, R.drawable.ic_cpu));
-        if (Voltage.getInstance().supported()) {
+        if (Voltage.getInstance().supported() || SuezDVFS.hasOppVoltageControl()) {
             mFragments.add(new NavigationActivity.NavigationFragment(R.string.cpu_voltage, CPUVoltageFragment.class, R.drawable.ic_bolt));
         }
         if (Hotplug.supported()) {
@@ -253,28 +254,7 @@ public class NavigationActivity extends BaseActivity
     }
 
     private void init(Bundle savedInstanceState) {
-        int result = getIntent().getIntExtra("result", -1);
-
-        if ((result == 1 || result == 2) && mLicenseDialog) {
-            ViewUtils.dialogBuilder(getString(R.string.license_invalid),
-                    null,
-                    (dialog, which) -> {
-                    },
-                    dialog -> mLicenseDialog = false, this)
-                    .show();
-        } else if (result == 3 && mLicenseDialog) {
-            ViewUtils.dialogBuilder(getString(R.string.pirated),
-                    null,
-                    (dialog, which) -> {
-                    },
-                    dialog -> mLicenseDialog = false, this)
-                    .show();
-        } else {
-            mLicenseDialog = false;
-            if (result == 0) {
-                Utils.DONATED = true;
-            }
-        }
+        mLicenseDialog = false;
 
         setContentView(R.layout.activity_navigation);
         Toolbar toolbar = getToolBar();

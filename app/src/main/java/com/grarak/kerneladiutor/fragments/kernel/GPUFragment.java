@@ -26,6 +26,7 @@ import com.grarak.kerneladiutor.fragments.recyclerview.RecyclerViewFragment;
 import com.grarak.kerneladiutor.utils.kernel.gpu.AdrenoIdler;
 import com.grarak.kerneladiutor.utils.kernel.gpu.GPUFreq;
 import com.grarak.kerneladiutor.utils.kernel.gpu.SimpleGPU;
+import com.grarak.kerneladiutor.utils.kernel.gpu.SuezGPU;
 import com.grarak.kerneladiutor.views.recyclerview.CardView;
 import com.grarak.kerneladiutor.views.recyclerview.DescriptionView;
 import com.grarak.kerneladiutor.views.recyclerview.RecyclerViewItem;
@@ -47,6 +48,10 @@ public class GPUFragment extends RecyclerViewFragment {
 
     private XYGraphView m2dCurFreq;
     private XYGraphView mCurFreq;
+    private SelectView mSuezMaximumFrequency;
+    private int mSuezCurrentFrequency;
+    private int mSuezMaximumFrequencyValue;
+    private List<Integer> mSuezFrequencies;
 
     private PathReaderFragment mGPUGovernorTunableFragment;
 
@@ -65,6 +70,10 @@ public class GPUFragment extends RecyclerViewFragment {
 
     @Override
     protected void addItems(List<RecyclerViewItem> items) {
+        if (SuezGPU.supported()) {
+            suezGpuInit(items);
+            return;
+        }
         freqInit(items);
         governorInit(items);
         if (SimpleGPU.supported()) {
@@ -73,6 +82,34 @@ public class GPUFragment extends RecyclerViewFragment {
         if (AdrenoIdler.supported()) {
             adrenoIdlerInit(items);
         }
+    }
+
+    private void suezGpuInit(List<RecyclerViewItem> items) {
+        CardView card = new CardView();
+        card.setTitle(getString(R.string.gpu));
+
+        mCurFreq = new XYGraphView();
+        mCurFreq.setTitle(getString(R.string.gpu_freq));
+        card.addItem(mCurFreq);
+
+        mSuezMaximumFrequency = new SelectView();
+        mSuezMaximumFrequency.setTitle(getString(R.string.gpu_max_freq));
+        mSuezMaximumFrequency.setSummary("Dynamic ceiling; MTK GPU DVFS remains enabled.");
+        mSuezFrequencies = SuezGPU.getFrequencies();
+        List<String> entries = new ArrayList<>();
+        for (int frequency : mSuezFrequencies) {
+            entries.add((frequency / 1000) + getString(R.string.mhz));
+        }
+        mSuezMaximumFrequency.setItems(entries);
+        int maximum = SuezGPU.getMaximumFrequency();
+        if (maximum > 0) {
+            mSuezMaximumFrequency.setItem((maximum / 1000) + getString(R.string.mhz));
+        }
+        mSuezMaximumFrequency.setOnItemSelected((selectView, position, item) ->
+                SuezGPU.setMaximumFrequency(mSuezFrequencies.get(position), getActivity()));
+        card.addItem(mSuezMaximumFrequency);
+
+        items.add(card);
     }
 
     private void freqInit(List<RecyclerViewItem> items) {
@@ -329,6 +366,13 @@ public class GPUFragment extends RecyclerViewFragment {
     protected void refreshThread() {
         super.refreshThread();
 
+        if (SuezGPU.supported()) {
+            mSuezCurrentFrequency = SuezGPU.getCurrentFrequency();
+            mSuezMaximumFrequencyValue = SuezGPU.getMaximumFrequency();
+            mSuezFrequencies = SuezGPU.getFrequencies();
+            return;
+        }
+
         m2dFreq = mGPUFreq.get2dCurFreq();
         m2dFreqs = mGPUFreq.get2dAvailableFreqs();
         mBusy = mGPUFreq.hasBusy() ? mGPUFreq.getBusy() : null;
@@ -345,6 +389,21 @@ public class GPUFragment extends RecyclerViewFragment {
     @Override
     protected void refresh() {
         super.refresh();
+
+        if (SuezGPU.supported()) {
+            if (mCurFreq != null && mSuezCurrentFrequency > 0 && mSuezFrequencies != null
+                    && !mSuezFrequencies.isEmpty()) {
+                int maximum = mSuezFrequencies.get(mSuezFrequencies.size() - 1);
+                mCurFreq.setText((mSuezCurrentFrequency / 1000) + getString(R.string.mhz));
+                mCurFreq.addPercentage(Math.round(Math.min(100f,
+                        (float) mSuezCurrentFrequency / maximum * 100f)));
+            }
+            if (mSuezMaximumFrequency != null && mSuezMaximumFrequencyValue > 0) {
+                mSuezMaximumFrequency.setItem((mSuezMaximumFrequencyValue / 1000)
+                        + getString(R.string.mhz));
+            }
+            return;
+        }
 
         if (m2dCurFreq != null && m2dFreq != null && m2dFreqs != null) {
             float maxFreq = m2dFreqs.get(m2dFreqs.size() - 1);
