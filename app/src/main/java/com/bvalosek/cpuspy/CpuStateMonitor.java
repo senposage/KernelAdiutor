@@ -175,7 +175,9 @@ public class CpuStateMonitor {
              * cluster representative used by the UI. */
             int statsCore = SuezDVFS.supported() ? SuezDVFS.getStatsCpu(mCore) : mCore;
             String file;
-            if (Utils.existFile(Utils.strFormat(CPUFreq.TIME_STATE, statsCore))) {
+            if (SuezDVFS.supported() && SuezDVFS.hasTimeInState(mCore)) {
+                file = SuezDVFS.getTimeInStatePath(mCore);
+            } else if (Utils.existFile(Utils.strFormat(CPUFreq.TIME_STATE, statsCore))) {
                 file = Utils.strFormat(CPUFreq.TIME_STATE, statsCore);
             } else {
                 file = Utils.strFormat(CPUFreq.TIME_STATE_2, statsCore);
@@ -212,8 +214,13 @@ public class CpuStateMonitor {
          * deep sleep time determined by difference between elapsed (total) boot
          * time and the system uptime (awake)
          */
-        long sleepTime = (SystemClock.elapsedRealtime() - SystemClock.uptimeMillis()) / 10;
-        mStates.add(new CpuState(0, sleepTime));
+        /* BIG-cluster residency is deliberately paused while HPS has that
+         * cluster parked. System deep sleep is not a BIG OPP, so including
+         * it would distort the card's uptime and frequency percentages. */
+        if (!SuezDVFS.supported() || !SuezDVFS.isBigCpu(mCore)) {
+            long sleepTime = (SystemClock.elapsedRealtime() - SystemClock.uptimeMillis()) / 10;
+            mStates.add(new CpuState(0, sleepTime));
+        }
 
         Collections.sort(mStates, Collections.reverseOrder());
     }

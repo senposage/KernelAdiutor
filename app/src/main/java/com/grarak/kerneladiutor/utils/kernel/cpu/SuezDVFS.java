@@ -29,6 +29,10 @@ public final class SuezDVFS {
             "/proc/cpufreq/MT_CPU_DVFS_LITTLE/cpufreq_freq";
     private static final String BIG_CURRENT =
             "/proc/cpufreq/MT_CPU_DVFS_BIG/cpufreq_freq";
+    private static final String LITTLE_TIME_IN_STATE =
+            "/proc/cpufreq/MT_CPU_DVFS_LITTLE/cpufreq_time_in_state";
+    private static final String BIG_TIME_IN_STATE =
+            "/proc/cpufreq/MT_CPU_DVFS_BIG/cpufreq_time_in_state";
     private static final String LITTLE_OPP_VOLTAGE =
             "/proc/cpufreq/MT_CPU_DVFS_LITTLE/cpufreq_opp_voltage";
     private static final String BIG_OPP_VOLTAGE =
@@ -117,6 +121,16 @@ public final class SuezDVFS {
     /** Stable per-cluster physical clock readback; HPS may remove cpu2 sysfs. */
     public static int getCurrentFreq(int cpu) {
         return Utils.strToInt(Utils.readFile(isBigCpu(cpu) ? BIG_CURRENT : LITTLE_CURRENT));
+    }
+
+    /** Cluster-owned residency counter; unlike sysfs cpufreq stats it remains
+     * available while HPS has parked the BIG cluster. */
+    public static String getTimeInStatePath(int cpu) {
+        return isBigCpu(cpu) ? BIG_TIME_IN_STATE : LITTLE_TIME_IN_STATE;
+    }
+
+    public static boolean hasTimeInState(int cpu) {
+        return Utils.existFile(getTimeInStatePath(cpu));
     }
 
     public static void setMaxFreq(int cpu, int frequency, String category, String id,
