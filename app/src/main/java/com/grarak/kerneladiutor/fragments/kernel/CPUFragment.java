@@ -302,6 +302,7 @@ public class CPUFragment extends RecyclerViewFragment {
         mCPUUsageLITTLE.setTitle(getString(R.string.cpu_usage_string,
                 getString(R.string.cluster_little)));
         items.add(mCPUUsageLITTLE);
+        addSuezGovernorCard(items);
         addSuezClusterCard(items, mCPUFreq.getLITTLECpu(), false);
 
         mCPUUsageBig = new XYGraphView();
@@ -309,6 +310,32 @@ public class CPUFragment extends RecyclerViewFragment {
                 getString(R.string.cluster_big)));
         items.add(mCPUUsageBig);
         addSuezClusterCard(items, mCPUFreq.getBigCpu(), true);
+    }
+
+    /* MT8173 exposes independent DVFS ceilings, but HPS recreates its BIG
+     * policy and does not retain a separate governor choice. Present the
+     * actual shared governor once instead of two misleading selectors. */
+    private void addSuezGovernorCard(List<RecyclerViewItem> items) {
+        CardView card = new CardView();
+        card.setTitle(getString(R.string.cpu_governor));
+
+        mSuezGovernor = new SelectView();
+        mSuezGovernor.setTitle(getString(R.string.cpu_governor));
+        mSuezGovernor.setSummary("Shared MTK governor; BIG has no independent governor.");
+        mSuezGovernor.setItems(mCPUFreq.getGovernors(mCPUFreq.getLITTLECpu()));
+        mSuezGovernor.setOnItemSelected((selectView, position, item) ->
+                mCPUFreq.setGovernor(item, mCPUFreq.getLITTLECpu(),
+                        mCPUFreq.getLITTLECpu(), getActivity()));
+        card.addItem(mSuezGovernor);
+
+        DescriptionView tunables = new DescriptionView();
+        tunables.setTitle(getString(R.string.cpu_governor_tunables));
+        tunables.setSummary(getString(R.string.governor_tunables_summary));
+        tunables.setOnItemClickListener(item -> showGovernorTunables(
+                mCPUFreq.getLITTLECpu(), mCPUFreq.getLITTLECpu()));
+        card.addItem(tunables);
+
+        items.add(card);
     }
 
     private void addSuezClusterCard(List<RecyclerViewItem> items, final int cpu,
@@ -337,29 +364,13 @@ public class CPUFragment extends RecyclerViewFragment {
                 mCPUFreq.getFreqs(cpu).get(position), cpu, cpu, getActivity()));
         card.addItem(min);
 
-        SelectView governor = new SelectView();
-        governor.setTitle(getString(R.string.cpu_governor));
-        governor.setSummary(getString(R.string.cpu_governor_summary));
-        governor.setItems(mCPUFreq.getGovernors(cpu));
-        governor.setOnItemSelected((selectView, position, item) ->
-                mCPUFreq.setGovernor(item, cpu, cpu, getActivity()));
-        card.addItem(governor);
-
-        DescriptionView tunables = new DescriptionView();
-        tunables.setTitle(getString(R.string.cpu_governor_tunables));
-        tunables.setSummary(getString(R.string.governor_tunables_summary));
-        tunables.setOnItemClickListener(item -> showGovernorTunables(cpu, cpu));
-        card.addItem(tunables);
-
         if (big) {
             mCPUMaxBig = max;
             mCPUMinBig = min;
-            mCPUGovernorBig = governor;
             mSuezCurrentFrequencyBig = current;
         } else {
             mCPUMaxLITTLE = max;
             mCPUMinLITTLE = min;
-            mCPUGovernorLITTLE = governor;
             mSuezCurrentFrequencyLITTLE = current;
         }
         items.add(card);
@@ -630,6 +641,8 @@ public class CPUFragment extends RecyclerViewFragment {
     private String mCPUGovernorStrLITTLE;
     private DescriptionView mSuezCurrentFrequencyBig;
     private DescriptionView mSuezCurrentFrequencyLITTLE;
+    private SelectView mSuezGovernor;
+    private String mSuezGovernorString;
 
     @Override
     protected void refreshThread() {
@@ -679,6 +692,10 @@ public class CPUFragment extends RecyclerViewFragment {
             mCPUGovernorStrLITTLE = mCPUFreq.getGovernor(mCPUFreq.getLITTLECpu(),
                     mCPUGovernorStrLITTLE == null);
         }
+        if (mSuezGovernor != null) {
+            mSuezGovernorString = mCPUFreq.getGovernor(mCPUFreq.getLITTLECpu(),
+                    mSuezGovernorString == null);
+        }
     }
 
     @Override
@@ -715,6 +732,10 @@ public class CPUFragment extends RecyclerViewFragment {
         }
         if (mCPUGovernorLITTLE != null && mCPUGovernorStrLITTLE != null && !mCPUGovernorStrLITTLE.isEmpty()) {
             mCPUGovernorLITTLE.setItem(mCPUGovernorStrLITTLE);
+        }
+        if (mSuezGovernor != null && mSuezGovernorString != null
+                && !mSuezGovernorString.isEmpty()) {
+            mSuezGovernor.setItem(mSuezGovernorString);
         }
 
         if (SuezDVFS.supported() && mCPUFreqs != null) {
