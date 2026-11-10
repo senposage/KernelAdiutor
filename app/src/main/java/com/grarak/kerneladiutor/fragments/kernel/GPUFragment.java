@@ -23,6 +23,7 @@ import com.grarak.kerneladiutor.R;
 import com.grarak.kerneladiutor.fragments.ApplyOnBootFragment;
 import com.grarak.kerneladiutor.fragments.BaseFragment;
 import com.grarak.kerneladiutor.fragments.recyclerview.RecyclerViewFragment;
+import com.grarak.kerneladiutor.utils.Utils;
 import com.grarak.kerneladiutor.utils.kernel.gpu.AdrenoIdler;
 import com.grarak.kerneladiutor.utils.kernel.gpu.GPUFreq;
 import com.grarak.kerneladiutor.utils.kernel.gpu.SimpleGPU;
@@ -37,6 +38,8 @@ import com.grarak.kerneladiutor.views.recyclerview.TitleView;
 import com.grarak.kerneladiutor.views.recyclerview.XYGraphView;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -52,8 +55,19 @@ public class GPUFragment extends RecyclerViewFragment {
     private int mSuezCurrentFrequency;
     private int mSuezMaximumFrequencyValue;
     private List<Integer> mSuezFrequencies;
+    private final List<SuezVoltageView> mSuezVoltageViews = new ArrayList<>();
 
     private PathReaderFragment mGPUGovernorTunableFragment;
+
+    private static class SuezVoltageView {
+        private final SelectView mView;
+        private final SuezGPU.OppVoltage mVoltage;
+
+        private SuezVoltageView(SelectView view, SuezGPU.OppVoltage voltage) {
+            mView = view;
+            mVoltage = voltage;
+        }
+    }
 
     @Override
     protected BaseFragment getForegroundFragment() {
@@ -85,6 +99,7 @@ public class GPUFragment extends RecyclerViewFragment {
     }
 
     private void suezGpuInit(List<RecyclerViewItem> items) {
+        mSuezVoltageViews.clear();
         CardView card = new CardView();
         card.setTitle(getString(R.string.gpu));
 
@@ -110,6 +125,73 @@ public class GPUFragment extends RecyclerViewFragment {
         card.addItem(mSuezMaximumFrequency);
 
         items.add(card);
+        suezGpuVoltageInit(items);
+    }
+
+    private void suezGpuVoltageInit(List<RecyclerViewItem> items) {
+        if (!SuezGPU.hasOppVoltageControl()) return;
+
+        CardView card = new CardView();
+        card.setTitle("GPU OPP voltage");
+
+        List<SuezGPU.OppVoltage> voltages = SuezGPU.getOppVoltages();
+        if (voltages.isEmpty()) return;
+
+        SuezGPU.OppVoltage live = voltages.get(0);
+        DescriptionView rail = new DescriptionView();
+        rail.setTitle("Live rail readback");
+        rail.setSummary("VGPU " + live.getLiveMillivolts() + getString(R.string.mv)
+                + " · kernel limit " + live.getMaximumMillivolts() + getString(R.string.mv));
+        card.addItem(rail);
+
+        DescriptionView reset = new DescriptionView();
+        reset.setTitle("Restore all stock voltages");
+        reset.setSummary("Resets every GPU OPP to its PTP-calibrated vendor value.");
+        reset.setOnItemClickListener(item -> {
+            for (SuezGPU.OppVoltage voltage : SuezGPU.getOppVoltages()) {
+                SuezGPU.resetOppVoltage(voltage, getActivity());
+            }
+            resetVisibleSuezVoltageViews();
+        });
+        card.addItem(reset);
+
+        Collections.sort(voltages, new Comparator<SuezGPU.OppVoltage>() {
+            @Override
+            public int compare(SuezGPU.OppVoltage left, SuezGPU.OppVoltage right) {
+                return right.getFrequency() - left.getFrequency();
+            }
+        });
+        for (final SuezGPU.OppVoltage voltage : voltages) {
+            SelectView view = new SelectView();
+            view.setTitle((voltage.getFrequency() / 1000) + getString(R.string.mhz));
+            view.setSummary(suezVoltageSummary(voltage, voltage.getAssignedMillivolts()));
+            view.setItems(SuezGPU.getVoltageChoices(voltage));
+            view.setItem(String.valueOf(voltage.getAssignedMillivolts()));
+            view.setOnItemSelected((selectView, position, item) -> {
+                int millivolts = Utils.strToInt(item);
+                selectView.setSummary(suezVoltageSummary(voltage, millivolts));
+                SuezGPU.setOppVoltage(voltage, millivolts, getActivity());
+            });
+            mSuezVoltageViews.add(new SuezVoltageView(view, voltage));
+            card.addItem(view);
+        }
+        items.add(card);
+    }
+
+    private void resetVisibleSuezVoltageViews() {
+        for (SuezVoltageView voltageView : mSuezVoltageViews) {
+            int stock = voltageView.mVoltage.getStockMillivolts();
+            voltageView.mView.setItem(String.valueOf(stock));
+            voltageView.mView.setSummary(suezVoltageSummary(voltageView.mVoltage, stock));
+        }
+    }
+
+    private String suezVoltageSummary(SuezGPU.OppVoltage voltage, int assignedMillivolts) {
+        String summary = "Stock " + voltage.getStockMillivolts() + getString(R.string.mv);
+        if (assignedMillivolts != voltage.getStockMillivolts()) {
+            summary += " · selected " + assignedMillivolts + getString(R.string.mv);
+        }
+        return summary + " · inactive OPPs apply on their next transition";
     }
 
     private void freqInit(List<RecyclerViewItem> items) {
