@@ -43,6 +43,7 @@ import java.util.List;
 public class VMFragment extends RecyclerViewFragment {
 
     private List<GenericSelectView> mVMs = new ArrayList<>();
+    private List<Integer> mVMPositions = new ArrayList<>();
 
     @Override
     protected void init() {
@@ -54,6 +55,7 @@ public class VMFragment extends RecyclerViewFragment {
     @Override
     protected void addItems(List<RecyclerViewItem> items) {
         mVMs.clear();
+        mVMPositions.clear();
         for (int i = 0; i < VM.size(); i++) {
             if (VM.exists(i)) {
                 GenericSelectView vm = new GenericSelectView();
@@ -71,6 +73,7 @@ public class VMFragment extends RecyclerViewFragment {
 
                 items.add(vm);
                 mVMs.add(vm);
+                mVMPositions.add(i);
             }
         }
 
@@ -170,7 +173,7 @@ public class VMFragment extends RecyclerViewFragment {
     private void refreshVMs() {
         getHandler().postDelayed(() -> {
             for (int i = 0; i < mVMs.size(); i++) {
-                mVMs.get(i).setValue(VM.getValue(i));
+                mVMs.get(i).setValue(VM.getValue(mVMPositions.get(i)));
                 mVMs.get(i).setValueRaw(mVMs.get(i).getValue());
             }
         }, 250);
