@@ -28,6 +28,7 @@ import com.grarak.kerneladiutor.utils.kernel.gpu.AdrenoIdler;
 import com.grarak.kerneladiutor.utils.kernel.gpu.GPUFreq;
 import com.grarak.kerneladiutor.utils.kernel.gpu.SimpleGPU;
 import com.grarak.kerneladiutor.utils.kernel.gpu.SuezGPU;
+import com.grarak.kerneladiutor.utils.kernel.gpu.T227GPU;
 import com.grarak.kerneladiutor.views.recyclerview.CardView;
 import com.grarak.kerneladiutor.views.recyclerview.DescriptionView;
 import com.grarak.kerneladiutor.views.recyclerview.RecyclerViewItem;
@@ -55,6 +56,10 @@ public class GPUFragment extends RecyclerViewFragment {
     private int mSuezCurrentFrequency;
     private int mSuezMaximumFrequencyValue;
     private List<Integer> mSuezFrequencies;
+    private SelectView mT227MaximumFrequency;
+    private int mT227CurrentFrequency;
+    private int mT227MaximumFrequencyValue;
+    private List<Integer> mT227Frequencies;
     private final List<SuezVoltageView> mSuezVoltageViews = new ArrayList<>();
 
     private PathReaderFragment mGPUGovernorTunableFragment;
@@ -84,6 +89,10 @@ public class GPUFragment extends RecyclerViewFragment {
 
     @Override
     protected void addItems(List<RecyclerViewItem> items) {
+        if (T227GPU.supported()) {
+            t227GpuInit(items);
+            return;
+        }
         if (SuezGPU.supported()) {
             suezGpuInit(items);
             return;
@@ -96,6 +105,31 @@ public class GPUFragment extends RecyclerViewFragment {
         if (AdrenoIdler.supported()) {
             adrenoIdlerInit(items);
         }
+    }
+
+    private void t227GpuInit(List<RecyclerViewItem> items) {
+        CardView card = new CardView();
+        card.setTitle(getString(R.string.gpu));
+
+        mCurFreq = new XYGraphView();
+        mCurFreq.setTitle(getString(R.string.gpu_freq));
+        card.addItem(mCurFreq);
+
+        mT227MaximumFrequency = new SelectView();
+        mT227MaximumFrequency.setTitle(getString(R.string.gpu_max_freq));
+        mT227MaximumFrequency.setSummary("Persistent MTK GPU DVFS ceiling.");
+        mT227Frequencies = T227GPU.getFrequencies();
+        List<String> entries = new ArrayList<>();
+        for (int frequency : mT227Frequencies) {
+            entries.add((frequency / 1000) + getString(R.string.mhz));
+        }
+        mT227MaximumFrequency.setItems(entries);
+        int maximum = T227GPU.getMaximumFrequency();
+        if (maximum > 0) mT227MaximumFrequency.setItem((maximum / 1000) + getString(R.string.mhz));
+        mT227MaximumFrequency.setOnItemSelected((selectView, position, item) ->
+                T227GPU.setMaximumFrequency(mT227Frequencies.get(position), getActivity()));
+        card.addItem(mT227MaximumFrequency);
+        items.add(card);
     }
 
     private void suezGpuInit(List<RecyclerViewItem> items) {
@@ -454,6 +488,10 @@ public class GPUFragment extends RecyclerViewFragment {
             mSuezFrequencies = SuezGPU.getFrequencies();
             return;
         }
+        if (T227GPU.supported()) {
+            mT227CurrentFrequency = T227GPU.getCurrentFrequency();
+            mT227MaximumFrequencyValue = T227GPU.getMaximumFrequency();
+        }
 
         m2dFreq = mGPUFreq.get2dCurFreq();
         m2dFreqs = mGPUFreq.get2dAvailableFreqs();
@@ -482,6 +520,22 @@ public class GPUFragment extends RecyclerViewFragment {
             }
             if (mSuezMaximumFrequency != null && mSuezMaximumFrequencyValue > 0) {
                 mSuezMaximumFrequency.setItem((mSuezMaximumFrequencyValue / 1000)
+                        + getString(R.string.mhz));
+            }
+            return;
+        }
+        if (T227GPU.supported()) {
+            if (mCurFreq != null && mT227CurrentFrequency > 0) {
+                int maximum = mT227Frequencies == null || mT227Frequencies.isEmpty() ? 0
+                        : mT227Frequencies.get(mT227Frequencies.size() - 1);
+                mCurFreq.setText((mT227CurrentFrequency / 1000) + getString(R.string.mhz));
+                if (maximum > 0) {
+                    mCurFreq.addPercentage(Math.round(Math.min(100f,
+                            (float) mT227CurrentFrequency / maximum * 100f)));
+                }
+            }
+            if (mT227MaximumFrequency != null && mT227MaximumFrequencyValue > 0) {
+                mT227MaximumFrequency.setItem((mT227MaximumFrequencyValue / 1000)
                         + getString(R.string.mhz));
             }
             return;

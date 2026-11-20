@@ -25,7 +25,7 @@ package com.grarak.kerneladiutor.utils.kernel.gpu;
 public class GPU {
 
     public static boolean supported() {
-        return SuezGPU.supported() || GPUFreq.getInstance().supported()
+        return T227GPU.supported() || SuezGPU.supported() || GPUFreq.getInstance().supported()
                 || SimpleGPU.supported() || AdrenoIdler.supported();
     }
 

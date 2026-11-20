@@ -98,6 +98,9 @@ public class CPUFreq {
         if (SuezDVFS.supported()) {
             return SuezDVFS.getGovernorTunablesPath(cpu, governor);
         }
+        if (T227UDVFS.supported()) {
+            return T227UDVFS.getGovernorTunablesPath(cpu, governor);
+        }
         if (Utils.existFile(Utils.strFormat(CPU_GOVERNOR_TUNABLES_CORE, cpu, governor))) {
             return CPU_GOVERNOR_TUNABLES_CORE.replace("%s", governor);
         } else {
@@ -303,6 +306,10 @@ public class CPUFreq {
             SuezDVFS.setGovernor(min, governor, ApplyOnBootFragment.CPU, context);
             return;
         }
+        if (T227UDVFS.supported()) {
+            T227UDVFS.setGovernor(min, governor, ApplyOnBootFragment.CPU, context);
+            return;
+        }
         applyCpu(CPU_SCALING_GOVERNOR, governor, min, max, context);
     }
 
@@ -313,6 +320,9 @@ public class CPUFreq {
     public String getGovernor(int cpu, boolean forceRead) {
         if (SuezDVFS.supported()) {
             return SuezDVFS.getGovernor(cpu);
+        }
+        if (T227UDVFS.supported()) {
+            return T227UDVFS.getGovernor(cpu);
         }
         boolean offline = forceRead && isOffline(cpu);
         if (offline) {
@@ -363,9 +373,10 @@ public class CPUFreq {
     }
 
     public List<String> getGovernors(int cpu) {
-        if (!SuezDVFS.supported()) return getGovernors();
-        String value = Utils.readFile(Utils.strFormat(CPU_AVAILABLE_GOVERNORS,
-                SuezDVFS.getPolicyCpu(cpu)));
+        if (!SuezDVFS.supported() && !T227UDVFS.supported()) return getGovernors();
+        String value = SuezDVFS.supported()
+                ? Utils.readFile(Utils.strFormat(CPU_AVAILABLE_GOVERNORS, SuezDVFS.getPolicyCpu(cpu)))
+                : T227UDVFS.getAvailableGovernors(cpu);
         if (value == null || value.trim().isEmpty()) return getGovernors();
         return Arrays.asList(value.trim().split("\\s+"));
     }
@@ -421,6 +432,10 @@ public class CPUFreq {
             SuezDVFS.setMinFreq(min, freq, ApplyOnBootFragment.CPU, context);
             return;
         }
+        if (T227UDVFS.supported()) {
+            T227UDVFS.setMinFreq(min, freq, ApplyOnBootFragment.CPU, context);
+            return;
+        }
         MSMPerformance msmPerformance = MSMPerformance.getInstance();
         int maxFreq = getMaxFreq(min, false);
 
@@ -446,6 +461,9 @@ public class CPUFreq {
         if (SuezDVFS.supported()) {
             return SuezDVFS.getMinFreq(cpu);
         }
+        if (T227UDVFS.supported()) {
+            return T227UDVFS.getMinFreq(cpu);
+        }
         return getFreq(cpu, CPU_MIN_FREQ, forceRead);
     }
 
@@ -457,6 +475,10 @@ public class CPUFreq {
             }
             String path = SuezDVFS.getMaxPath(min);
             SuezDVFS.setMaxFreq(min, freq, ApplyOnBootFragment.CPU, path, context);
+            return;
+        }
+        if (T227UDVFS.supported()) {
+            T227UDVFS.setMaxFreq(min, freq, ApplyOnBootFragment.CPU, context);
             return;
         }
         MSMPerformance msmPerformance = MSMPerformance.getInstance();
@@ -496,6 +518,9 @@ public class CPUFreq {
     public int getMaxFreq(int cpu, boolean forceRead) {
         if (SuezDVFS.supported()) {
             return SuezDVFS.getMaxFreq(cpu);
+        }
+        if (T227UDVFS.supported()) {
+            return T227UDVFS.getMaxFreq(cpu);
         }
         if (Utils.existFile(Utils.strFormat(CPU_MAX_FREQ_KT, cpu))) {
             return getFreq(cpu, CPU_MAX_FREQ_KT, forceRead);
@@ -675,6 +700,11 @@ public class CPUFreq {
             if (SuezDVFS.supported()) {
                 mBigCpu = 2;
                 mLITTLECpu = 0;
+                return true;
+            }
+            if (T227UDVFS.supported()) {
+                mBigCpu = 0;
+                mLITTLECpu = 4;
                 return true;
             }
             if (getCpuCount() <= 4 && !is8996()

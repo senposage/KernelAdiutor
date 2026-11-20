@@ -142,4 +142,21 @@ public class Control {
         getInstance().run(command, category, id, context);
     }
 
+    /** Remove an obsolete persisted setting without running a replacement command. */
+    public static void removeSetting(final String category, final String id, final Context context) {
+        if (context == null) return;
+        getInstance().mExecutor.execute(() -> {
+            Settings settings = new Settings(context);
+            List<Settings.SettingsItem> items = settings.getAllSettings();
+            for (int i = items.size() - 1; i >= 0; i--) {
+                if (items.get(i).getId().equals(id)
+                        && items.get(i).getCategory().equals(category)) {
+                    settings.delete(i);
+                }
+            }
+            settings.commit();
+            Log.i(TAG, "removed obsolete setting " + id);
+        });
+    }
+
 }

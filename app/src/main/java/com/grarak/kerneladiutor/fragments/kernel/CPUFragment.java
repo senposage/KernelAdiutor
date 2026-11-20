@@ -34,6 +34,7 @@ import com.grarak.kerneladiutor.utils.kernel.cpu.CPUBoost;
 import com.grarak.kerneladiutor.utils.kernel.cpu.CPUFreq;
 import com.grarak.kerneladiutor.utils.kernel.cpu.Misc;
 import com.grarak.kerneladiutor.utils.kernel.cpu.SuezDVFS;
+import com.grarak.kerneladiutor.utils.kernel.cpu.T227UDVFS;
 import com.grarak.kerneladiutor.views.dialog.Dialog;
 import com.grarak.kerneladiutor.views.recyclerview.CardView;
 import com.grarak.kerneladiutor.views.recyclerview.DescriptionView;
@@ -131,6 +132,11 @@ public class CPUFragment extends RecyclerViewFragment {
             suezFreqInit(items);
             return;
         }
+        if (T227UDVFS.supported()) {
+            T227UDVFS.removeLegacyFrequencySettings(getActivity());
+            t227FreqInit(items);
+            return;
+        }
         mCPUUsageBig = new XYGraphView();
         if (mCPUFreq.isBigLITTLE()) {
             mCPUUsageBig.setTitle(getString(R.string.cpu_usage_string, getString(R.string.cluster_big)));
@@ -140,20 +146,27 @@ public class CPUFragment extends RecyclerViewFragment {
 
         items.add(mCPUUsageBig);
 
-        CardView bigCoresCard = new CardView();
-        if (mCPUFreq.isBigLITTLE()) {
-            bigCoresCard.setTitle(getString(R.string.cores_string, getString(R.string.cluster_big)));
-        }
-
         final List<Integer> bigCores = mCPUFreq.getBigCpuRange();
+        final boolean t227PolicyManaged = T227UDVFS.supported();
 
-        mCoresBig.clear();
-        for (final int core : bigCores) {
-            SwitchView coreSwitch = new SwitchView();
-            coreSwitch.setSummary(getString(R.string.core, core + 1));
+        /* MT6765 PPM owns CPU online state. Exposing generic per-core
+         * toggles here both misrepresents the two policies and triggers a
+         * policy re-evaluation that can overwrite a DVFS request. */
+        CardView bigCoresCard = null;
+        if (!t227PolicyManaged) {
+            bigCoresCard = new CardView();
+            if (mCPUFreq.isBigLITTLE()) {
+                bigCoresCard.setTitle(getString(R.string.cores_string,
+                        getString(R.string.cluster_big)));
+            }
+            mCoresBig.clear();
+            for (final int core : bigCores) {
+                SwitchView coreSwitch = new SwitchView();
+                coreSwitch.setSummary(getString(R.string.core, core + 1));
 
-            mCoresBig.put(core, coreSwitch);
-            bigCoresCard.addItem(coreSwitch);
+                mCoresBig.put(core, coreSwitch);
+                bigCoresCard.addItem(coreSwitch);
+            }
         }
 
         CardView bigFrequenciesCard = new CardView();
@@ -170,14 +183,16 @@ public class CPUFragment extends RecyclerViewFragment {
                 bigCores.get(bigCores.size() - 1), getActivity()));
         bigFrequenciesCard.addItem(mCPUMaxBig);
 
-        mCPUMinBig = new SelectView();
-        mCPUMinBig.setTitle(getString(R.string.cpu_min_freq));
-        mCPUMinBig.setSummary(getString(R.string.cpu_min_freq_summary));
-        mCPUMinBig.setItems(mCPUFreq.getAdjustedFreq(getActivity()));
-        mCPUMinBig.setOnItemSelected((selectView, position, item)
-                -> mCPUFreq.setMinFreq(mCPUFreq.getFreqs().get(position), bigCores.get(0),
-                bigCores.get(bigCores.size() - 1), getActivity()));
-        bigFrequenciesCard.addItem(mCPUMinBig);
+        if (!T227UDVFS.supported() || T227UDVFS.hasMinControl(bigCores.get(0))) {
+            mCPUMinBig = new SelectView();
+            mCPUMinBig.setTitle(getString(R.string.cpu_min_freq));
+            mCPUMinBig.setSummary(getString(R.string.cpu_min_freq_summary));
+            mCPUMinBig.setItems(mCPUFreq.getAdjustedFreq(getActivity()));
+            mCPUMinBig.setOnItemSelected((selectView, position, item)
+                    -> mCPUFreq.setMinFreq(mCPUFreq.getFreqs().get(position), bigCores.get(0),
+                    bigCores.get(bigCores.size() - 1), getActivity()));
+            bigFrequenciesCard.addItem(mCPUMinBig);
+        }
 
         if (mCPUFreq.hasMaxScreenOffFreq()) {
             mCPUMaxScreenOffBig = new SelectView();
@@ -211,7 +226,7 @@ public class CPUFragment extends RecyclerViewFragment {
                 -> showGovernorTunables(bigCores.get(0), bigCores.get(bigCores.size() - 1)));
         bigGovernorsCard.addItem(governorTunablesBig);
 
-        items.add(bigCoresCard);
+        if (bigCoresCard != null) items.add(bigCoresCard);
         items.add(bigFrequenciesCard);
         items.add(bigGovernorsCard);
 
@@ -221,18 +236,20 @@ public class CPUFragment extends RecyclerViewFragment {
 
             items.add(mCPUUsageLITTLE);
 
-            CardView LITTLECoresCard = new CardView();
-            LITTLECoresCard.setTitle(getString(R.string.cores_string, getString(R.string.cluster_little)));
-
             final List<Integer> LITTLECores = mCPUFreq.getLITTLECpuRange();
+            CardView LITTLECoresCard = null;
+            if (!t227PolicyManaged) {
+                LITTLECoresCard = new CardView();
+                LITTLECoresCard.setTitle(getString(R.string.cores_string,
+                        getString(R.string.cluster_little)));
+                mCoresLITTLE.clear();
+                for (final int core : LITTLECores) {
+                    SwitchView coreSwitch = new SwitchView();
+                    coreSwitch.setSummary(getString(R.string.core, core + 1));
 
-            mCoresLITTLE.clear();
-            for (final int core : LITTLECores) {
-                SwitchView coreSwitch = new SwitchView();
-                coreSwitch.setSummary(getString(R.string.core, core + 1));
-
-                mCoresLITTLE.put(core, coreSwitch);
-                LITTLECoresCard.addItem(coreSwitch);
+                    mCoresLITTLE.put(core, coreSwitch);
+                    LITTLECoresCard.addItem(coreSwitch);
+                }
             }
 
             CardView LITTLEFrequenciesCard = new CardView();
@@ -247,14 +264,16 @@ public class CPUFragment extends RecyclerViewFragment {
                     LITTLECores.get(0), LITTLECores.get(LITTLECores.size() - 1), getActivity()));
             LITTLEFrequenciesCard.addItem(mCPUMaxLITTLE);
 
-            mCPUMinLITTLE = new SelectView();
-            mCPUMinLITTLE.setTitle(getString(R.string.cpu_min_freq));
-            mCPUMinLITTLE.setSummary(getString(R.string.cpu_min_freq_summary));
-            mCPUMinLITTLE.setItems(mCPUFreq.getAdjustedFreq(mCPUFreq.getLITTLECpu(), getActivity()));
-            mCPUMinLITTLE.setOnItemSelected((selectView, position, item)
-                    -> mCPUFreq.setMinFreq(mCPUFreq.getFreqs(mCPUFreq.getLITTLECpu()).get(position),
-                    LITTLECores.get(0), LITTLECores.get(LITTLECores.size() - 1), getActivity()));
-            LITTLEFrequenciesCard.addItem(mCPUMinLITTLE);
+            if (!T227UDVFS.supported() || T227UDVFS.hasMinControl(LITTLECores.get(0))) {
+                mCPUMinLITTLE = new SelectView();
+                mCPUMinLITTLE.setTitle(getString(R.string.cpu_min_freq));
+                mCPUMinLITTLE.setSummary(getString(R.string.cpu_min_freq_summary));
+                mCPUMinLITTLE.setItems(mCPUFreq.getAdjustedFreq(mCPUFreq.getLITTLECpu(), getActivity()));
+                mCPUMinLITTLE.setOnItemSelected((selectView, position, item)
+                        -> mCPUFreq.setMinFreq(mCPUFreq.getFreqs(mCPUFreq.getLITTLECpu()).get(position),
+                        LITTLECores.get(0), LITTLECores.get(LITTLECores.size() - 1), getActivity()));
+                LITTLEFrequenciesCard.addItem(mCPUMinLITTLE);
+            }
 
             if (mCPUFreq.hasMaxScreenOffFreq(mCPUFreq.getLITTLECpu())) {
                 mCPUMaxScreenOffLITTLE = new SelectView();
@@ -286,10 +305,78 @@ public class CPUFragment extends RecyclerViewFragment {
                     -> showGovernorTunables(LITTLECores.get(0), LITTLECores.get(LITTLECores.size() - 1)));
             LITTLEGovernorsCard.addItem(governorTunablesLITTLE);
 
-            items.add(LITTLECoresCard);
+            if (LITTLECoresCard != null) items.add(LITTLECoresCard);
             items.add(LITTLEFrequenciesCard);
             items.add(LITTLEGovernorsCard);
         }
+    }
+
+    /**
+     * MT6765 has two PPM-managed DVFS policies. Keep every control for a
+     * policy in one card: the generic two-column list interleaves cards from
+     * both clusters and makes the relationship between a governor and its
+     * persistent MTK ceiling needlessly ambiguous.
+     */
+    private void t227FreqInit(List<RecyclerViewItem> items) {
+        addT227PolicyCard(items, mCPUFreq.getBigCpu(), true);
+        addT227PolicyCard(items, mCPUFreq.getLITTLECpu(), false);
+    }
+
+    private void addT227PolicyCard(List<RecyclerViewItem> items, final int cpu,
+                                   final boolean big) {
+        CardView card = new CardView();
+        String cluster = getString(big ? R.string.cluster_big : R.string.cluster_little);
+        card.setTitle(cluster + (big ? " (CPU 0-3)" : " (CPU 4-7)"));
+
+        XYGraphView usage = new XYGraphView();
+        usage.setTitle(getString(R.string.cpu_usage_string, cluster));
+        card.addItem(usage);
+
+        SelectView max = new SelectView();
+        max.setTitle(getString(R.string.cpu_max_freq));
+        max.setSummary("Persistent MTK PPM ceiling for this cluster.");
+        max.setItems(mCPUFreq.getAdjustedFreq(cpu, getActivity()));
+        max.setOnItemSelected((selectView, position, item) -> mCPUFreq.setMaxFreq(
+                mCPUFreq.getFreqs(cpu).get(position), cpu, cpu, getActivity()));
+        card.addItem(max);
+
+        SelectView min = null;
+        if (T227UDVFS.hasMinControl(cpu)) {
+            min = new SelectView();
+            min.setTitle(getString(R.string.cpu_min_freq));
+            min.setSummary("Persistent MTK PPM floor for this cluster.");
+            min.setItems(mCPUFreq.getAdjustedFreq(cpu, getActivity()));
+            min.setOnItemSelected((selectView, position, item) -> mCPUFreq.setMinFreq(
+                    mCPUFreq.getFreqs(cpu).get(position), cpu, cpu, getActivity()));
+            card.addItem(min);
+        }
+
+        SelectView governor = new SelectView();
+        governor.setTitle(getString(R.string.cpu_governor));
+        governor.setSummary(getString(R.string.cpu_governor_summary));
+        governor.setItems(mCPUFreq.getGovernors(cpu));
+        governor.setOnItemSelected((selectView, position, item) ->
+                mCPUFreq.setGovernor(item, cpu, cpu, getActivity()));
+        card.addItem(governor);
+
+        DescriptionView tunables = new DescriptionView();
+        tunables.setTitle(getString(R.string.cpu_governor_tunables));
+        tunables.setSummary(getString(R.string.governor_tunables_summary));
+        tunables.setOnItemClickListener(item -> showGovernorTunables(cpu, cpu));
+        card.addItem(tunables);
+
+        if (big) {
+            mCPUUsageBig = usage;
+            mCPUMaxBig = max;
+            mCPUMinBig = min;
+            mCPUGovernorBig = governor;
+        } else {
+            mCPUUsageLITTLE = usage;
+            mCPUMaxLITTLE = max;
+            mCPUMinLITTLE = min;
+            mCPUGovernorLITTLE = governor;
+        }
+        items.add(card);
     }
 
     /**
@@ -377,7 +464,8 @@ public class CPUFragment extends RecyclerViewFragment {
     }
 
     private void showGovernorTunables(int min, int max) {
-        boolean offline = !SuezDVFS.supported() && mCPUFreq.isOffline(min);
+        boolean offline = !SuezDVFS.supported() && !T227UDVFS.supported()
+                && mCPUFreq.isOffline(min);
         if (offline) {
             mCPUFreq.onlineCpu(min, true, false, null);
         }
