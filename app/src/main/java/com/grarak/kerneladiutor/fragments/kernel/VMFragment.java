@@ -28,6 +28,7 @@ import com.grarak.kerneladiutor.utils.kernel.vm.VM;
 import com.grarak.kerneladiutor.utils.kernel.vm.ZRAM;
 import com.grarak.kerneladiutor.utils.kernel.vm.ZSwap;
 import com.grarak.kerneladiutor.views.recyclerview.CardView;
+import com.grarak.kerneladiutor.views.recyclerview.DescriptionView;
 import com.grarak.kerneladiutor.views.recyclerview.GenericSelectView;
 import com.grarak.kerneladiutor.views.recyclerview.RecyclerViewItem;
 import com.grarak.kerneladiutor.views.recyclerview.SeekBarView;
@@ -88,6 +89,10 @@ public class VMFragment extends RecyclerViewFragment {
         zramTitle.setText(getString(R.string.zram));
         items.add(zramTitle);
 
+        DescriptionView readback = new DescriptionView();
+        readback.setTitle("Active ZRAM readback");
+        readback.setSummary(zramReadback());
+
         SeekBarView zram = new SeekBarView();
         zram.setTitle(getString(R.string.disksize));
         zram.setSummary(getString(R.string.disksize_summary));
@@ -99,6 +104,10 @@ public class VMFragment extends RecyclerViewFragment {
             @Override
             public void onStop(SeekBarView seekBarView, int position, String value) {
                 ZRAM.setDisksize(position * 10, getActivity());
+                getHandler().postDelayed(() -> {
+                    seekBarView.setProgress(ZRAM.getDisksize() / 10);
+                    readback.setSummary(zramReadback());
+                }, 1000);
             }
 
             @Override
@@ -107,6 +116,15 @@ public class VMFragment extends RecyclerViewFragment {
         });
 
         items.add(zram);
+        items.add(readback);
+    }
+
+    private String zramReadback() {
+        String algorithm = ZRAM.getCompressionAlgorithm();
+        String streams = ZRAM.getMaxCompressionStreams();
+        return ZRAM.getDisksize() + " MB · "
+                + (algorithm == null ? "unknown compressor" : algorithm)
+                + " · " + (streams == null ? "unknown" : streams) + " streams";
     }
 
     private void zswapInit(List<RecyclerViewItem> items) {
