@@ -21,8 +21,10 @@ package com.grarak.kerneladiutor.fragments.kernel;
 
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.preference.PreferenceManager;
 import android.support.v7.app.AlertDialog;
 import android.text.InputType;
 
@@ -44,14 +46,20 @@ import com.grarak.kerneladiutor.views.recyclerview.TitleView;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Created by willi on 29.06.16.
  */
 public class VMFragment extends RecyclerViewFragment {
+
+    private static final String AUTO_EXCLUSIONS = "zram_training_auto_exclusions";
+    private static final String MANUAL_WORKLOADS_TITLE = "Choose up to four processes";
+    private static final String AUTO_WORKLOADS_TITLE = "Auto · check processes to exclude";
 
     private List<GenericSelectView> mVMs = new ArrayList<>();
     private List<Integer> mVMPositions = new ArrayList<>();
@@ -191,6 +199,7 @@ public class VMFragment extends RecyclerViewFragment {
         List<ResolveInfo> apps = new ArrayList<>(manager.queryIntentActivities(launcher, 0));
         Collections.sort(apps, new ResolveInfo.DisplayNameComparator(manager));
         Map<String, String> labels = new LinkedHashMap<>();
+        labels.put(ZramTrainingService.ANDROID_SYSTEM, "Android System\nsystem_server");
         for (ResolveInfo app : apps) {
             String name = app.activityInfo.packageName;
             if (!name.equals(context.getPackageName()) && ZramTrainingService.validPackage(name)) {
@@ -198,36 +207,57 @@ public class VMFragment extends RecyclerViewFragment {
             }
         }
         List<String> packages = new ArrayList<>(labels.keySet());
-        if (packages.isEmpty()) {
-            Utils.toast("No eligible launcher apps found.", context);
-            return;
-        }
-        boolean[] selected = new boolean[packages.size()];
+        List<String> choices = new ArrayList<>(labels.values());
+        choices.add(0, "Auto\nSample running workloads automatically");
+        boolean[] selected = new boolean[choices.size()];
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
+        Set<String> savedExclusions = preferences.getStringSet(AUTO_EXCLUSIONS, Collections.emptySet());
         AlertDialog dialog = new AlertDialog.Builder(context)
-                .setTitle("Choose up to four workload apps")
-                .setMultiChoiceItems(labels.values().toArray(new String[0]), selected,
-                        (picker, which, checked) -> selected[which] = checked)
+                .setTitle(MANUAL_WORKLOADS_TITLE)
+                .setMultiChoiceItems(choices.toArray(new String[0]), selected,
+                        (picker, which, checked) -> {
+                            selected[which] = checked;
+                            if (which != 0) return;
+                            AlertDialog listDialog = (AlertDialog) picker;
+                            listDialog.setTitle(checked ? AUTO_WORKLOADS_TITLE : MANUAL_WORKLOADS_TITLE);
+                            for (int i = 0; i < packages.size(); i++) {
+                                int row = i + 1;
+                                selected[row] = checked && savedExclusions.contains(packages.get(i));
+                                listDialog.getListView().setItemChecked(row, selected[row]);
+                            }
+                        })
                 .setPositiveButton("Continue", null)
                 .setNegativeButton(android.R.string.cancel, null)
                 .create();
         dialog.setOnShowListener(ignored ->
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+                    boolean automatic = selected[0];
                     ArrayList<String> chosen = new ArrayList<>();
-                    for (int i = 0; i < selected.length; i++) {
-                        if (selected[i]) chosen.add(packages.get(i));
+                    Set<String> exclusions = new HashSet<>();
+                    for (int i = 0; i < packages.size(); i++) {
+                        String name = packages.get(i);
+                        if (automatic && selected[i + 1]) exclusions.add(name);
+                        if (selected[i + 1] != automatic) chosen.add(name);
                     }
-                    if (chosen.isEmpty() || chosen.size() > ZramTrainingService.MAX_WORKLOADS) {
-                        Utils.toast("Choose one to four apps.", context);
+                    if (chosen.isEmpty() || (!automatic
+                            && chosen.size() > ZramTrainingService.MAX_WORKLOADS)) {
+                        Utils.toast(automatic ? "Leave at least one process available."
+                                : "Choose one to four processes.", context);
                         return;
                     }
                     dialog.dismiss();
+                    String scope = automatic ? "KA samples running processes in the list, "
+                            + "except for your exclusions. "
+                            : "KA samples the selected processes while they are running. ";
                     new AlertDialog.Builder(context)
                             .setTitle("Start workload sampling")
-                            .setMessage("KA samples memory from your selected running apps. "
-                                    + "A dictionary can contain fragments of that memory. "
+                            .setMessage(scope + "A dictionary can contain fragments of their memory. "
                                     + "Keep personal dictionaries local and stop sampling when done.")
-                            .setPositiveButton("Start sampling",
-                                    (confirm, which) -> ZramTrainingService.start(context, chosen))
+                            .setPositiveButton("Start sampling", (confirm, which) -> {
+                                if (automatic) preferences.edit()
+                                        .putStringSet(AUTO_EXCLUSIONS, exclusions).apply();
+                                ZramTrainingService.start(context, chosen, automatic);
+                            })
                             .setNegativeButton(android.R.string.cancel, null)
                             .show();
                 }));

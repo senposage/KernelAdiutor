@@ -28,6 +28,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.text.Normalizer;
@@ -47,12 +48,14 @@ import java.util.regex.Pattern;
 public class ZramTrainingService extends Service {
 
     public static final int MAX_WORKLOADS = 4;
+    public static final String ANDROID_SYSTEM = "system_server";
     private static final String ASSET = "arm64/zram_trainer";
     private static final String CHANNEL = "zram_training";
     private static final String STOP = "stop_zram_training";
     private static final String BUILD = "build_zram_dictionary";
     private static final String DISCARD = "discard_zram_samples";
     private static final String PACKAGES = "packages";
+    private static final String AUTOMATIC = "automatic";
     private static final String LAST_RESULT = "zram_training_result";
     private static final String DICTIONARY_REPORT = "zram_dictionary_report.";
     private static final int PAGE_BYTES = 4096;
@@ -60,6 +63,7 @@ public class ZramTrainingService extends Service {
     private static final int BATCH_PAGES = 128;
     private static final int ROUND_PAGES = 32;
     private static final int WORKLOAD_PAGES = 512;
+    private static final int MAX_PAGES = MAX_WORKLOADS * WORKLOAD_PAGES;
     private static final int ROUND_INTERVAL_MS = 90_000;
     private static final Pattern PACKAGE_NAME =
             Pattern.compile("[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+");
@@ -73,6 +77,7 @@ public class ZramTrainingService extends Service {
     private volatile boolean mStop;
     private volatile boolean mCancelled;
     private ArrayList<String> mPackages;
+    private boolean mAutomatic;
     private boolean mBuild;
     private boolean mDiscard;
     private volatile Process mProcess;
@@ -113,9 +118,10 @@ public class ZramTrainingService extends Service {
                 .getString(DICTIONARY_REPORT + filename, "");
     }
 
-    public static void start(Context context, ArrayList<String> packages) {
+    public static void start(Context context, ArrayList<String> packages, boolean automatic) {
         Utils.startService(context, new Intent(context, ZramTrainingService.class)
-                .putStringArrayListExtra(PACKAGES, packages));
+                .putStringArrayListExtra(PACKAGES, packages)
+                .putExtra(AUTOMATIC, automatic));
     }
 
     public static void stop(Context context) {
@@ -161,7 +167,9 @@ public class ZramTrainingService extends Service {
         }
         if (sRunning) return START_NOT_STICKY;
         ArrayList<String> packages = intent.getStringArrayListExtra(PACKAGES);
+        boolean automatic = intent.getBooleanExtra(AUTOMATIC, false);
         mPackages = packages;
+        mAutomatic = automatic;
         mStop = false;
         mBuild = false;
         mDiscard = false;
@@ -172,7 +180,7 @@ public class ZramTrainingService extends Service {
                     CHANNEL, "ZRAM dictionary training", NotificationManager.IMPORTANCE_LOW));
         }
         startForeground(NotificationId.ZRAM_TRAINING, notification(true));
-        new Thread(() -> runSession(packages), "ZRAM dictionary trainer").start();
+        new Thread(() -> runSession(packages, automatic), "ZRAM dictionary trainer").start();
         return START_NOT_STICKY;
     }
 
@@ -208,12 +216,13 @@ public class ZramTrainingService extends Service {
             }
         } else if (!running && mPackages != null && !mPackages.isEmpty()) {
             Intent start = new Intent(this, ZramTrainingService.class)
-                    .putStringArrayListExtra(PACKAGES, mPackages);
+                    .putStringArrayListExtra(PACKAGES, mPackages)
+                    .putExtra(AUTOMATIC, mAutomatic);
             int flags = PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE;
             PendingIntent retry = Build.VERSION.SDK_INT >= 26
                     ? PendingIntent.getForegroundService(this, 0, start, flags)
                     : PendingIntent.getService(this, 0, start, flags);
-            builder.addAction(0, "Sample same apps", retry);
+            builder.addAction(0, mAutomatic ? "Start Auto sampling" : "Sample same apps", retry);
         }
         return builder.build();
     }
@@ -229,16 +238,18 @@ public class ZramTrainingService extends Service {
         if (!mCancelled) manager().notify(NotificationId.ZRAM_TRAINING, notification(true));
     }
 
-    private void runSession(ArrayList<String> packages) {
+    private void runSession(ArrayList<String> packages, boolean automatic) {
         File helper = null;
         String result;
         try {
-            if (packages == null || packages.isEmpty() || packages.size() > MAX_WORKLOADS
+            if (packages == null || packages.isEmpty()
+                    || (!automatic && packages.size() > MAX_WORKLOADS)
                     || new HashSet<>(packages).size() != packages.size()) {
                 throw new IOException("Choose one to four distinct apps.");
             }
             for (String name : packages) {
-                if (!validPackage(name) || name.equals(getPackageName()))
+                if ((!ANDROID_SYSTEM.equals(name) && !validPackage(name))
+                        || name.equals(getPackageName()))
                     throw new IOException("Invalid app selection.");
             }
             helper = File.createTempFile("zram-trainer-", "", getCacheDir());
@@ -252,7 +263,7 @@ public class ZramTrainingService extends Service {
                 throw new IOException("Could not make the trainer executable.");
             requireSuccess(runRoot("test \"$(id -u)\" = 0", null, 0),
                     "Kernel Adiutor needs root access.");
-            result = collectAndTrain(helper, packages);
+            result = collectAndTrain(helper, packages, automatic);
         } catch (IOException e) {
             result = "Training stopped. " + e.getMessage();
         } catch (InterruptedException | NoSuchAlgorithmException e) {
@@ -276,22 +287,29 @@ public class ZramTrainingService extends Service {
         });
     }
 
-    private String collectAndTrain(File helper, List<String> packages)
+    private String collectAndTrain(File helper, List<String> packages, boolean automatic)
             throws IOException, InterruptedException, NoSuchAlgorithmException {
         List<byte[]> pages = new ArrayList<>();
         Set<ByteBuffer> seen = new HashSet<>();
         int[] counts = new int[packages.size()];
         List<String> labels = workloadLabels(packages);
-        int target = packages.size() * WORKLOAD_PAGES;
+        int target = Math.min(MAX_PAGES, packages.size() * WORKLOAD_PAGES);
+        int nextWorkload = 0;
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         Random random = new Random();
         while (!mStop && !mCancelled && pages.size() < target) {
             boolean lowMemory = false;
             boolean captured = false;
-            for (int i = 0; i < packages.size() && !mStop && !mCancelled; i++) {
-                int remaining = WORKLOAD_PAGES - counts[i];
-                if (remaining == 0) continue;
+            Set<String> running = automatic ? runningWorkloads() : null;
+            int attempted = 0;
+            for (int visited = 0; visited < packages.size() && attempted < MAX_WORKLOADS
+                    && pages.size() < target && !mStop && !mCancelled; visited++) {
+                int i = nextWorkload;
+                nextWorkload = (nextWorkload + 1) % packages.size();
                 String name = packages.get(i);
+                int remaining = Math.min(WORKLOAD_PAGES - counts[i], target - pages.size());
+                if (remaining == 0 || (running != null && !running.contains(name))) continue;
+                attempted++;
                 String command = "pid=$(pidof -s '" + name + "') || exit 3; "
                         + "exec timeout 12 " + quote(helper.getPath()) + " capture \"$pid\" '"
                         + name + "' " + BATCH_PAGES + " " + random.nextInt(Integer.MAX_VALUE)
@@ -302,6 +320,7 @@ public class ZramTrainingService extends Service {
                     break;
                 }
                 if (sample.code == 3 || sample.code == 124) continue;
+                if (automatic && sample.code != 0) continue;
                 requireSuccess(sample, "Could not read " + name + " through KernelSU.");
                 if (sample.bytes.length % PAGE_BYTES != 0)
                     throw new IOException("The sampler returned a partial page.");
@@ -311,6 +330,7 @@ public class ZramTrainingService extends Service {
             }
             if (!mStop && !mCancelled && pages.size() < target) {
                 String state = lowMemory ? "Paused for low memory."
+                        : automatic ? "Auto sampling running workloads."
                         : captured ? "Sampling selected apps." : "Waiting for a selected app to run.";
                 progress(state + " " + pages.size() + " / " + target + " unique pages.");
                 long next = SystemClock.elapsedRealtime() + ROUND_INTERVAL_MS;
@@ -369,10 +389,21 @@ public class ZramTrainingService extends Service {
         return "Saved " + name + "\n" + report;
     }
 
+    private Set<String> runningWorkloads() throws IOException, InterruptedException {
+        Result result = runRoot("exec ps -A -o NAME", null, 128 * 1024);
+        requireSuccess(result, "Could not list running workloads.");
+        String names = new String(result.bytes, StandardCharsets.UTF_8);
+        return new HashSet<>(Arrays.asList(names.trim().split("\\s+")));
+    }
+
     private List<String> workloadLabels(List<String> packages) {
         PackageManager manager = getPackageManager();
         List<String> labels = new ArrayList<>();
         for (String name : packages) {
+            if (ANDROID_SYSTEM.equals(name)) {
+                labels.add("Android System");
+                continue;
+            }
             try {
                 labels.add(manager.getApplicationInfo(name, 0).loadLabel(manager).toString());
             } catch (PackageManager.NameNotFoundException e) {

@@ -7,6 +7,13 @@ duplicate and repeated-fill pages and holds at most 512 usable pages
 per selected app. Sampling stops at the quota or with **Stop sampling**.
 At least 128 usable pages are needed to build.
 
+Check **Auto** at the top of the workload picker to rotate through running
+launcher app main processes and Android System (`system_server`). In
+Auto mode, check the processes to exclude. KA remembers those exclusions
+when you start a session. Auto samples up to four sources per round and
+keeps the same 2,048-page total limit. Android System can also be selected
+in manual mode.
+
 Use **Build when idle** after closing the workload. KA checks idle CPU
 time and available RAM before building. If the tablet is too busy, it
 keeps the samples in memory so you can retry. The notification shows
@@ -38,6 +45,10 @@ Local artifact: `E:\KA-Trainer.apk`
 
 APK SHA-256: `7f73e4f8bb48843a756e8d466b981d8cc629ec43827abfd28d7a0ca3bab38d5c`
 
+Auto update: `E:\KA-Trainer-Auto.apk`
+
+APK SHA-256: `f57d35746fc1b4a588e5118991671d402a1a033229db84f9990dbd6e2d0fa314`
+
 ## Verification
 
 - The ZRAM setup harness passed named-file selection, plain LZ4,
@@ -49,3 +60,6 @@ APK SHA-256: `7f73e4f8bb48843a756e8d466b981d8cc629ec43827abfd28d7a0ca3bab38d5c`
   cache through KernelSU. The new APK's interactive notification and
   picker were not exercised on the tablet.
 - The debug APK signature verified and matched the previous T227U KA APK.
+- The Auto update was installed on the T227U. The workload picker
+  showed the Auto checkbox, exclusion mode, and the Android System
+  entry. The ZRAM setup harness passed again.
