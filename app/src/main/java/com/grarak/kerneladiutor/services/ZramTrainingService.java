@@ -64,7 +64,7 @@ public class ZramTrainingService extends Service {
     private static final int ROUND_PAGES = 32;
     private static final int WORKLOAD_PAGES = 512;
     private static final int MAX_PAGES = MAX_WORKLOADS * WORKLOAD_PAGES;
-    private static final int ROUND_INTERVAL_MS = 90_000;
+    private static final int ROUND_INTERVAL_MS = 30_000;
     private static final Pattern PACKAGE_NAME =
             Pattern.compile("[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+");
 

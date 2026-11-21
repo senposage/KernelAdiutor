@@ -2,7 +2,7 @@
 
 In Virtual Memory, tap **Train an LZ4 dictionary** and select up to
 four apps. KA takes small samples from resident writable anonymous
-pages in their main processes about every 90 seconds. It skips
+pages in their main processes with a 30-second wait between rounds. It skips
 duplicate and repeated-fill pages and holds at most 512 usable pages
 per selected app. Sampling stops at the quota or with **Stop sampling**.
 At least 128 usable pages are needed to build.
@@ -48,6 +48,10 @@ APK SHA-256: `7f73e4f8bb48843a756e8d466b981d8cc629ec43827abfd28d7a0ca3bab38d5c`
 Auto update: `E:\KA-Trainer-Auto.apk`
 
 APK SHA-256: `f57d35746fc1b4a588e5118991671d402a1a033229db84f9990dbd6e2d0fa314`
+
+30-second update: `E:\KA-Trainer-30s.apk`
+
+APK SHA-256: `bff83eb14346d129b9e4caec26b2cc2e9d39b65093e9a50aabf417b2d1880d09`
 
 ## Verification
 
