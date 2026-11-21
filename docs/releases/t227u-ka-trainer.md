@@ -67,6 +67,11 @@ Checkpoint recovery update: `E:\KA-Trainer-Resume.apk`
 
 APK SHA-256: `950af4c4a0939b5bf22ff09f6aaf3aa0805605aa2cc49ea6b5e08e8141ca6a63`
 
+The same signed APK is staged as `E:\KernelAdiutor-T227U-ZRAM.apk` for
+the [T227U KA prerelease](https://github.com/senposage/KernelAdiutor/releases/tag/t227u-ka-lz4d).
+The tablet disconnected before installation. Install and verify the new
+APK before replacing the published `KA-LZ4D.apk` asset.
+
 ## Verification
 
 - The ZRAM setup harness passed named-file selection, plain LZ4,
