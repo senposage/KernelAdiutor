@@ -215,7 +215,7 @@ public class ApplyOnBoot {
                         if (zramBootCommand != null && ApplyOnBootFragment.VM.equals(category)
                                 && ZRAM.isSetupSetting(id)) {
                             if (!zramQueued && ZRAM.isSizeSetting(id)) {
-                                commands.add(zramBootCommand);
+                                if (!script) commands.add(zramBootCommand);
                                 zramQueued = true;
                             }
                             continue;
@@ -252,6 +252,9 @@ public class ApplyOnBoot {
                     file.mkdir();
                     file.write(s.toString(), false);
                     file.execute();
+                    // RootFile's line-by-line writer does not preserve the
+                    // quoting of this multi-line shell transaction.
+                    if (zramQueued) su.runCommand(zramBootCommand);
                 } else {
                     for (String command : commands) {
                         synchronized (this) {
