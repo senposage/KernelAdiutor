@@ -43,6 +43,7 @@ import com.grarak.kerneladiutor.utils.Utils;
 import com.grarak.kerneladiutor.utils.kernel.cpu.CPUFreq;
 import com.grarak.kerneladiutor.utils.kernel.cpu.MSMPerformance;
 import com.grarak.kerneladiutor.utils.kernel.cpu.SuezDVFS;
+import com.grarak.kerneladiutor.utils.kernel.vm.ZRAM;
 import com.grarak.kerneladiutor.utils.kernel.cpuhotplug.CoreCtl;
 import com.grarak.kerneladiutor.utils.kernel.cpuhotplug.MPDecision;
 import com.grarak.kerneladiutor.utils.root.Control;
@@ -196,12 +197,29 @@ public class ApplyOnBoot {
                 }
 
                 List<String> commands = new ArrayList<>();
-                for (Settings.SettingsItem item : settings.getAllSettings()) {
+                List<Settings.SettingsItem> savedSettings = settings.getAllSettings();
+                String zramBootCommand = null;
+                for (Settings.SettingsItem item : savedSettings) {
+                    if (ApplyOnBootFragment.VM.equals(item.getCategory())
+                            && ZRAM.isSizeSetting(item.getId())) {
+                        zramBootCommand = ZRAM.bootCommand(item.getSetting(), service);
+                    }
+                }
+                boolean zramQueued = false;
+                for (Settings.SettingsItem item : savedSettings) {
                     String category = item.getCategory();
                     String setting = item.getSetting();
                     String id = item.getId();
                     CPUFreq.ApplyCpu applyCpu;
-                    if (mCategoryEnabled.get(category)) {
+                    if (Boolean.TRUE.equals(mCategoryEnabled.get(category))) {
+                        if (zramBootCommand != null && ApplyOnBootFragment.VM.equals(category)
+                                && ZRAM.isSetupSetting(id)) {
+                            if (!zramQueued && ZRAM.isSizeSetting(id)) {
+                                commands.add(zramBootCommand);
+                                zramQueued = true;
+                            }
+                            continue;
+                        }
                         /* Old generic CPU entries may contain a per-core
                          * policy action.  On suez that helper toggles CPU
                          * online state while restoring a value, which is not

@@ -31,6 +31,18 @@ You can report a bug or request a feature by [opening an issue](https://github.c
 
 ## Download & Build
 
+### T227U ZRAM dictionary
+
+On a kernel with the T227U dictionary ABI, copy a raw dictionary (8 to
+65,536 bytes) to `Download/KernelAdiutor/zram-lz4.dict` on the tablet.
+Save a nonzero ZRAM size with **Apply ZRAM size** and enable **Apply on
+Boot** for Virtual Memory. On boot, KA uploads the file before initializing
+ZRAM and then enables swap. An absent or rejected dictionary falls back to
+plain LZ4. If zram0 is already active at boot-time apply, KA leaves it alone.
+Remove the file before a reboot to return to plain LZ4.
+
+The host-side transaction fixture is `sh tests/zram_setup_test.sh`.
+
 Clone the project and come in:
 
 ``` bash

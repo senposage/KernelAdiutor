@@ -25,6 +25,9 @@ import com.grarak.kerneladiutor.fragments.ApplyOnBootFragment;
 import com.grarak.kerneladiutor.utils.Utils;
 import com.grarak.kerneladiutor.utils.root.Control;
 
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 /**
  * Created by willi on 03.08.16.
  */
@@ -36,34 +39,57 @@ public class ZRAM {
     private static final String RESET = "/sys/block/zram0/reset";
     private static final String MAX_COMP_STREAMS = "/sys/block/zram0/max_comp_streams";
     private static final String COMP_ALGORITHM = "/sys/block/zram0/comp_algorithm";
-    private static final String LZ4 = "lz4";
+    private static final String COMP_DICTIONARY_SIZE = ZRAM + "/comp_dictionary_size";
+    public static final String DICTIONARY_FILE = "/sdcard/Download/KernelAdiutor/zram-lz4.dict";
+    private static final Pattern SAVED_SIZE = Pattern.compile(
+            "^(?:\\(ka_zram_bytes=([0-9]+);|echo '([0-9]+)' > /sys/block/zram0/disksize$)");
 
     public static void setDisksize(final int value, final Context context) {
-        String maxCompStrems = null;
-        if (Utils.existFile(MAX_COMP_STREAMS)) {
-            maxCompStrems = Utils.readFile(MAX_COMP_STREAMS);
-        }
-        int size = value * 1024 * 1024;
-        run("swapoff " + BLOCK + " > /dev/null 2>&1", BLOCK + "swapoff", context);
-        run(Control.write("1", RESET), RESET, context);
-        // A reset restores the driver's default compressor.  Prefer LZ4 when
-        // the active kernel advertises it: it is the tested low-latency choice
-        // for the T227U, while leaving kernels without LZ4 untouched.
-        if (hasLz4()) {
-            run(Control.write(LZ4, COMP_ALGORITHM), COMP_ALGORITHM, context);
-        }
-        if (maxCompStrems != null) {
-            run(Control.write(maxCompStrems, MAX_COMP_STREAMS), MAX_COMP_STREAMS, context);
-        }
-        if (size != 0) {
-            run(Control.write(String.valueOf(size), DISKSIZE), DISKSIZE, context);
-            run("mkswap " + BLOCK + " > /dev/null 2>&1", BLOCK + "mkswap", context);
-            run("swapon " + BLOCK + " > /dev/null 2>&1", BLOCK + "swapon", context);
+        String command = setupCommand(value * 1024L * 1024L, false, context);
+        if (command != null) run(command, DISKSIZE, context);
+    }
+
+    public static boolean isSizeSetting(String id) {
+        return DISKSIZE.equals(id);
+    }
+
+    public static boolean isSetupSetting(String id) {
+        return isSizeSetting(id) || RESET.equals(id) || COMP_ALGORITHM.equals(id)
+                || MAX_COMP_STREAMS.equals(id) || (BLOCK + "swapoff").equals(id)
+                || (BLOCK + "mkswap").equals(id) || (BLOCK + "swapon").equals(id)
+                || (BLOCK + "swapoff-algorithm").equals(id)
+                || (RESET + "algorithm").equals(id) || (DISKSIZE + "reset").equals(id);
+    }
+
+    /** Upgrade old saved resize commands without requiring another manual apply. */
+    public static String bootCommand(String saved, Context context) {
+        if (saved == null) return null;
+        Matcher match = SAVED_SIZE.matcher(saved);
+        if (!match.find()) return null;
+        try {
+            return setupCommand(Long.parseLong(match.group(1) == null
+                    ? match.group(2) : match.group(1)), true, context);
+        } catch (NumberFormatException e) {
+            return null;
         }
     }
 
+    private static String setupCommand(long bytes, boolean boot, Context context) {
+        if (context == null || bytes < 0 || bytes > 2048L * 1024L * 1024L) return null;
+        String script = Utils.readAssetFile(context, "t227u_zram_setup.sh");
+        if (script == null || script.isEmpty()) return null;
+        return "(ka_zram_bytes=" + bytes + ";\n"
+                + "ka_zram_boot=" + (boot ? 1 : 0) + "\n"
+                + "ka_zram_dir='" + ZRAM + "'\n"
+                + "ka_zram_block='" + BLOCK + "'\n"
+                + "ka_zram_proc_swaps='/proc/swaps'\n"
+                + "ka_zram_dictionary='" + DICTIONARY_FILE + "'\n"
+                + "ka_zram_dictionary_fallback='/data/media/0/Download/KernelAdiutor/zram-lz4.dict'\n"
+                + script + "\n)";
+    }
+
     public static int getDisksize() {
-        return Utils.strToInt(Utils.readFile(DISKSIZE)) / 1024 / 1024;
+        return (int) (Utils.strToLong(Utils.readFile(DISKSIZE)) / 1024 / 1024);
     }
 
     public static String getCompressionAlgorithm() {
@@ -78,9 +104,12 @@ public class ZRAM {
         return Utils.readFile(MAX_COMP_STREAMS);
     }
 
-    private static boolean hasLz4() {
-        String algorithms = getCompressionAlgorithms();
-        return algorithms != null && algorithms.contains(LZ4);
+    public static boolean supportsDictionary() {
+        return Utils.existFile(COMP_DICTIONARY_SIZE);
+    }
+
+    public static int getDictionarySize() {
+        return Utils.strToInt(Utils.readFile(COMP_DICTIONARY_SIZE));
     }
 
     private static String getCompressionAlgorithms() {

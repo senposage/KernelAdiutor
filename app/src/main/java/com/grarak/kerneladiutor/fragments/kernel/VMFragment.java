@@ -45,6 +45,8 @@ public class VMFragment extends RecyclerViewFragment {
 
     private List<GenericSelectView> mVMs = new ArrayList<>();
     private List<Integer> mVMPositions = new ArrayList<>();
+    private int mPendingZramSize;
+    private boolean mZramResizeInProgress;
 
     @Override
     protected void init() {
@@ -103,28 +105,85 @@ public class VMFragment extends RecyclerViewFragment {
         zram.setOnSeekBarListener(new SeekBarView.OnSeekBarListener() {
             @Override
             public void onStop(SeekBarView seekBarView, int position, String value) {
-                ZRAM.setDisksize(position * 10, getActivity());
-                getHandler().postDelayed(() -> {
-                    seekBarView.setProgress(ZRAM.getDisksize() / 10);
-                    readback.setSummary(zramReadback());
-                }, 1000);
+                mPendingZramSize = position * 10;
             }
 
             @Override
             public void onMove(SeekBarView seekBarView, int position, String value) {
+                mPendingZramSize = position * 10;
             }
         });
 
+        mPendingZramSize = ZRAM.getDisksize();
         items.add(zram);
         items.add(readback);
+
+        if (ZRAM.supportsDictionary()) {
+            DescriptionView dictionary = new DescriptionView();
+            dictionary.setTitle("LZ4 dictionary");
+            dictionary.setSummary("Copy zram-lz4.dict to Download/KernelAdiutor and enable "
+                    + "Virtual Memory Apply on Boot. It loads before ZRAM starts.");
+            items.add(dictionary);
+        }
+
+        DescriptionView apply = new DescriptionView();
+        apply.setTitle("Apply ZRAM size");
+        apply.setSummary("Applies the selected size once after swap is recreated.");
+        apply.setOnItemClickListener(item ->
+                applyZramResize(zram, readback, apply));
+        items.add(apply);
     }
 
     private String zramReadback() {
         String algorithm = ZRAM.getCompressionAlgorithm();
         String streams = ZRAM.getMaxCompressionStreams();
+        String dictionary = "";
+        if (ZRAM.supportsDictionary()) {
+            int size = ZRAM.getDictionarySize();
+            dictionary = size > 0 ? " · dictionary " + size + " B" : " · plain";
+        }
         return ZRAM.getDisksize() + " MB · "
                 + (algorithm == null ? "unknown compressor" : algorithm)
-                + " · " + (streams == null ? "unknown" : streams) + " streams";
+                + " · " + (streams == null ? "unknown" : streams) + " streams" + dictionary;
+    }
+
+    /** A resize tears down active swap, so never bind it to slider movement. */
+    private void applyZramResize(final SeekBarView seekBarView,
+                                 final DescriptionView readback,
+                                 final DescriptionView apply) {
+        if (mZramResizeInProgress) return;
+        mZramResizeInProgress = true;
+        seekBarView.setEnabled(false);
+        readback.setSummary("Applying " + mPendingZramSize + " MB…");
+        apply.setSummary("Resize in progress…");
+        ZRAM.setDisksize(mPendingZramSize, getActivity());
+        confirmZramResize(seekBarView, readback, apply, mPendingZramSize, 0);
+    }
+
+    private void confirmZramResize(final SeekBarView seekBarView,
+                                   final DescriptionView readback,
+                                   final DescriptionView apply,
+                                   final int requestedSizeMb, final int attempt) {
+        getHandler().postDelayed(() -> {
+            int actualSizeMb = ZRAM.getDisksize();
+            if (actualSizeMb == requestedSizeMb || attempt >= 20) {
+                // Do not ever replace the selected slider value with the
+                // transient zero observed while reset is in progress.
+                if (actualSizeMb == requestedSizeMb) {
+                    seekBarView.setProgress(actualSizeMb / 10);
+                    readback.setSummary(zramReadback());
+                    apply.setSummary("Applied " + actualSizeMb + " MB. Tap to apply a new selection.");
+                } else {
+                    readback.setSummary("Resize did not settle; current readback is "
+                            + actualSizeMb + " MB.");
+                    apply.setSummary("Tap to retry the selected " + requestedSizeMb + " MB.");
+                }
+                seekBarView.setEnabled(true);
+                mZramResizeInProgress = false;
+            } else {
+                confirmZramResize(seekBarView, readback, apply, requestedSizeMb, attempt + 1);
+            }
+        }, 250);
     }
 
     private void zswapInit(List<RecyclerViewItem> items) {
