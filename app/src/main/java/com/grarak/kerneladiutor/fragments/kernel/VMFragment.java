@@ -166,7 +166,9 @@ public class VMFragment extends RecyclerViewFragment {
         if (mTrainer != null && context != null) {
             CharSequence title = ZramTrainingService.isTraining() ? "Building an LZ4 dictionary"
                     : ZramTrainingService.isReady() ? "Build an LZ4 dictionary"
-                    : ZramTrainingService.isRunning() ? "Stop sampling" : "Train an LZ4 dictionary";
+                    : ZramTrainingService.isRunning() ? "Stop sampling"
+                    : ZramTrainingService.canResume(context) ? "Resume LZ4 training"
+                    : "Train an LZ4 dictionary";
             if (!title.equals(mTrainer.getTitle())) mTrainer.setTitle(title);
             String status = ZramTrainingService.status(context);
             if (!status.equals(mTrainer.getSummary())) mTrainer.setSummary(status);
@@ -188,6 +190,8 @@ public class VMFragment extends RecyclerViewFragment {
                     .show();
         } else if (ZramTrainingService.isRunning()) {
             ZramTrainingService.stop(context);
+        } else if (ZramTrainingService.canResume(context)) {
+            ZramTrainingService.resume(context);
         } else {
             chooseWorkloads(context);
         }

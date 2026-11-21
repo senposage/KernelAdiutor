@@ -161,14 +161,28 @@ static int capture(unsigned long pid, const char *package, unsigned long limit,
     return fflush(stdout) == 0 ? 0 : 1;
 }
 
-static int train(void)
+static size_t read_samples(unsigned char *samples, size_t expected_pages)
+{
+    if (expected_pages == 0)
+        return fread(samples, 1, (MAX_PAGES + 1) * PAGE_BYTES, stdin);
+
+    for (size_t i = 0; i < expected_pages; ++i) {
+        uint32_t source;
+        if (fread(&source, sizeof(source), 1, stdin) != 1 ||
+            fread(samples + i * PAGE_BYTES, PAGE_BYTES, 1, stdin) != 1)
+            return 0;
+    }
+    return fgetc(stdin) == EOF ? expected_pages * PAGE_BYTES : 0;
+}
+
+static int train(size_t expected_pages)
 {
     if (!can_train())
         return 2;
     unsigned char *samples = malloc((MAX_PAGES + 1) * PAGE_BYTES);
     if (!samples)
         return 1;
-    size_t bytes = fread(samples, 1, (MAX_PAGES + 1) * PAGE_BYTES, stdin);
+    size_t bytes = read_samples(samples, expected_pages);
     size_t pages = bytes / PAGE_BYTES;
     if (ferror(stdin) || bytes % PAGE_BYTES || pages < MIN_PAGES || pages > MAX_PAGES) {
         free(samples);
@@ -203,7 +217,11 @@ static int train(void)
 int main(int argc, char **argv)
 {
     if (argc == 2 && !strcmp(argv[1], "train"))
-        return train();
+        return train(0);
+    if (argc == 3 && !strcmp(argv[1], "train-checkpoint")) {
+        unsigned long pages = strtoul(argv[2], NULL, 10);
+        return pages >= MIN_PAGES && pages <= MAX_PAGES ? train(pages) : 1;
+    }
     if (argc == 6 && !strcmp(argv[1], "capture"))
         return capture(strtoul(argv[2], NULL, 10), argv[3],
                        strtoul(argv[4], NULL, 10), strtoul(argv[5], NULL, 10));

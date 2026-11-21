@@ -7,6 +7,7 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Handler;
@@ -21,7 +22,9 @@ import com.grarak.kerneladiutor.utils.NotificationId;
 import com.grarak.kerneladiutor.utils.Utils;
 import com.grarak.kerneladiutor.utils.kernel.vm.ZRAM;
 
+import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -54,16 +57,22 @@ public class ZramTrainingService extends Service {
     private static final String STOP = "stop_zram_training";
     private static final String BUILD = "build_zram_dictionary";
     private static final String DISCARD = "discard_zram_samples";
+    private static final String RESUME = "resume_zram_sampling";
     private static final String PACKAGES = "packages";
     private static final String AUTOMATIC = "automatic";
     private static final String LAST_RESULT = "zram_training_result";
     private static final String DICTIONARY_REPORT = "zram_dictionary_report.";
+    private static final String CHECKPOINT = "zram_training_checkpoint";
+    private static final String CHECKPOINT_PACKAGES = "zram_training_checkpoint_packages";
+    private static final String CHECKPOINT_AUTO = "zram_training_checkpoint_auto";
+    private static final String CHECKPOINT_READY = "zram_training_checkpoint_ready";
     private static final int PAGE_BYTES = 4096;
     private static final int MIN_PAGES = 128;
     private static final int BATCH_PAGES = 128;
     private static final int ROUND_PAGES = 32;
     private static final int MAX_PAGES = 2048;
     private static final int DICTIONARY_BYTES = 16 * 1024;
+    private static final int RECORD_BYTES = Integer.BYTES + PAGE_BYTES;
     private static final int ROUND_INTERVAL_MS = 30_000;
     private static final Pattern PACKAGE_NAME =
             Pattern.compile("[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+");
@@ -78,6 +87,7 @@ public class ZramTrainingService extends Service {
     private volatile boolean mCancelled;
     private ArrayList<String> mPackages;
     private boolean mAutomatic;
+    private String mCheckpointDir;
     private boolean mBuild;
     private boolean mDiscard;
     private volatile Process mProcess;
@@ -109,6 +119,7 @@ public class ZramTrainingService extends Service {
     }
 
     public static String status(Context context) {
+        if (!sRunning && canResume(context)) return "Sampling interrupted. Tap to resume saved pages.";
         return sStatus == null ? PreferenceManager.getDefaultSharedPreferences(context)
                 .getString(LAST_RESULT, "Tap to choose apps and start sampling.") : sStatus;
     }
@@ -122,6 +133,14 @@ public class ZramTrainingService extends Service {
         Utils.startService(context, new Intent(context, ZramTrainingService.class)
                 .putStringArrayListExtra(PACKAGES, packages)
                 .putExtra(AUTOMATIC, automatic));
+    }
+
+    public static boolean canResume(Context context) {
+        return PreferenceManager.getDefaultSharedPreferences(context).contains(CHECKPOINT);
+    }
+
+    public static void resume(Context context) {
+        Utils.startService(context, new Intent(context, ZramTrainingService.class).setAction(RESUME));
     }
 
     public static void stop(Context context) {
@@ -147,11 +166,7 @@ public class ZramTrainingService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent == null) {
-            stopSelf();
-            return START_NOT_STICKY;
-        }
-        String action = intent.getAction();
+        String action = intent == null ? null : intent.getAction();
         if (STOP.equals(action) || BUILD.equals(action) || DISCARD.equals(action)) {
             if (sRunning && !sTraining) {
                 synchronized (mWake) {
@@ -163,25 +178,37 @@ public class ZramTrainingService extends Service {
             } else if (!sRunning) {
                 stopSelf();
             }
+            return sRunning ? START_STICKY : START_NOT_STICKY;
+        }
+        if (sRunning) return START_STICKY;
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(this);
+        boolean restoring = intent == null || RESUME.equals(action);
+        String id = restoring ? preferences.getString(CHECKPOINT, "") : UUID.randomUUID().toString();
+        if (!id.matches("[a-f0-9-]{36}")) {
+            stopSelf();
             return START_NOT_STICKY;
         }
-        if (sRunning) return START_NOT_STICKY;
-        ArrayList<String> packages = intent.getStringArrayListExtra(PACKAGES);
-        boolean automatic = intent.getBooleanExtra(AUTOMATIC, false);
+        ArrayList<String> packages = restoring
+                ? new ArrayList<>(Arrays.asList(preferences.getString(CHECKPOINT_PACKAGES, "").split("\\n")))
+                : intent.getStringArrayListExtra(PACKAGES);
+        boolean automatic = restoring ? preferences.getBoolean(CHECKPOINT_AUTO, false)
+                : intent.getBooleanExtra(AUTOMATIC, false);
         mPackages = packages;
         mAutomatic = automatic;
-        mStop = false;
+        mCheckpointDir = "/dev/.ka-zram-" + android.os.Process.myUid() + "-" + id;
+        mStop = restoring && preferences.getBoolean(CHECKPOINT_READY, false);
         mBuild = false;
         mDiscard = false;
         sRunning = true;
-        sStatus = "Preparing sampler…";
+        sStatus = restoring ? "Recovering sampled pages…" : "Preparing sampler…";
         if (Build.VERSION.SDK_INT >= 26) {
             manager().createNotificationChannel(new NotificationChannel(
                     CHANNEL, "ZRAM dictionary training", NotificationManager.IMPORTANCE_LOW));
         }
         startForeground(NotificationId.ZRAM_TRAINING, notification(true));
-        new Thread(() -> runSession(packages, automatic), "ZRAM dictionary trainer").start();
-        return START_NOT_STICKY;
+        new Thread(() -> runSession(packages, automatic, id, restoring),
+                "ZRAM dictionary trainer").start();
+        return START_STICKY;
     }
 
     @Override
@@ -238,9 +265,11 @@ public class ZramTrainingService extends Service {
         if (!mCancelled) manager().notify(NotificationId.ZRAM_TRAINING, notification(true));
     }
 
-    private void runSession(ArrayList<String> packages, boolean automatic) {
+    private void runSession(ArrayList<String> packages, boolean automatic, String id,
+                            boolean restoring) {
         File helper = null;
         String result;
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(this);
         try {
             if (packages == null || packages.isEmpty()
                     || (!automatic && packages.size() > MAX_WORKLOADS)
@@ -252,7 +281,7 @@ public class ZramTrainingService extends Service {
                         || name.equals(getPackageName()))
                     throw new IOException("Invalid app selection.");
             }
-            helper = File.createTempFile("zram-trainer-", "", getCacheDir());
+            helper = new File(getCacheDir(), "zram-trainer-" + id);
             try (InputStream asset = getAssets().open(ASSET);
                  OutputStream output = new FileOutputStream(helper)) {
                 byte[] buffer = new byte[8192];
@@ -263,13 +292,25 @@ public class ZramTrainingService extends Service {
                 throw new IOException("Could not make the trainer executable.");
             requireSuccess(runRoot("test \"$(id -u)\" = 0", null, 0),
                     "Kernel Adiutor needs root access.");
-            result = collectAndTrain(helper, packages, automatic);
+            prepareCheckpoint(packages, automatic, id, restoring, preferences);
+            result = collectAndTrain(helper, packages, automatic, restoring, preferences);
         } catch (IOException e) {
             result = "Training stopped. " + e.getMessage();
         } catch (InterruptedException | NoSuchAlgorithmException e) {
             result = "Training interrupted.";
         } finally {
             if (helper != null) helper.delete();
+        }
+        if (!mCancelled) {
+            try {
+                requireSuccess(runRoot("dir=" + quote(mCheckpointDir) + "; "
+                        + "[ ! -d \"$dir\" ] || { rm -f \"$dir\"/batch-* \"$dir\"/.batch-* "
+                        + "&& rmdir \"$dir\"; }", null, 0), "Could not clear the RAM checkpoint.");
+                preferences.edit().remove(CHECKPOINT).remove(CHECKPOINT_PACKAGES)
+                        .remove(CHECKPOINT_AUTO).remove(CHECKPOINT_READY).commit();
+            } catch (IOException | InterruptedException e) {
+                result += " " + e.getMessage();
+            }
         }
         final String message = result;
         mMain.post(() -> {
@@ -287,22 +328,90 @@ public class ZramTrainingService extends Service {
         });
     }
 
-    private String collectAndTrain(File helper, List<String> packages, boolean automatic)
+    private void prepareCheckpoint(List<String> packages, boolean automatic, String id,
+                                   boolean restoring, SharedPreferences preferences)
+            throws IOException, InterruptedException {
+        String directory = quote(mCheckpointDir);
+        String command = "test \"$(stat -f -c %T /dev)\" = tmpfs && ";
+        if (restoring) {
+            command += "test \"$(stat -c %u:%a " + directory + " 2>/dev/null)\" = 0:700";
+        } else {
+            command += "umask 077 && mkdir -m 700 " + directory;
+        }
+        requireSuccess(runRoot(command, null, 0), restoring
+                ? "The volatile checkpoint is gone, possibly after a reboot."
+                : "Could not create a private RAM checkpoint.");
+        if (!restoring && !preferences.edit().putString(CHECKPOINT, id)
+                .putString(CHECKPOINT_PACKAGES, TextUtils.join("\n", packages))
+                .putBoolean(CHECKPOINT_AUTO, automatic).putBoolean(CHECKPOINT_READY, false).commit()) {
+            throw new IOException("Could not save the checkpoint state.");
+        }
+    }
+
+    private String checkpointStream() {
+        return "for file in " + quote(mCheckpointDir) + "/batch-*; do "
+                + "[ -f \"$file\" ] || continue; cat \"$file\" || exit 1; done";
+    }
+
+    private void restorePages(Set<ByteBuffer> seen, int[] counts, MessageDigest digest)
+            throws IOException, InterruptedException {
+        if (mCancelled) throw new InterruptedException();
+        Process process = new ProcessBuilder("su", "-c", checkpointStream()).start();
+        mProcess = process;
+        try (DataInputStream input = new DataInputStream(
+                new BufferedInputStream(process.getInputStream()))) {
+            process.getOutputStream().close();
+            byte[] record = new byte[RECORD_BYTES];
+            ByteBuffer sourceField = ByteBuffer.wrap(record);
+            int first;
+            while ((first = input.read()) != -1) {
+                if (mCancelled) throw new InterruptedException();
+                record[0] = (byte) first;
+                input.readFully(record, 1, RECORD_BYTES - 1);
+                int source = sourceField.getInt(0);
+                if (source < 0 || source >= counts.length || seen.size() == MAX_PAGES)
+                    throw new IOException("Invalid RAM checkpoint.");
+                digest.update(record, Integer.BYTES, PAGE_BYTES);
+                if (!seen.add(ByteBuffer.wrap(digest.digest())))
+                    throw new IOException("The RAM checkpoint contains a duplicate page.");
+                counts[source]++;
+            }
+            if (process.waitFor() != 0) throw new IOException("Could not read saved samples.");
+        } finally {
+            process.destroy();
+            mProcess = null;
+        }
+    }
+
+    private void checkpointBatch(List<byte[]> batch) throws IOException, InterruptedException {
+        if (batch.isEmpty()) return;
+        String name = UUID.randomUUID().toString();
+        String command = "dir=" + quote(mCheckpointDir) + "; umask 077; "
+                + "tmp=\"$dir/.batch-" + name + "\"; trap 'rm -f \"$tmp\"' EXIT; "
+                + "cat > \"$tmp\" && [ \"$(stat -c %s \"$tmp\")\" = "
+                + (batch.size() / 2) * RECORD_BYTES + " ] "
+                + "&& mv \"$tmp\" \"$dir/batch-" + name + "\"";
+        requireSuccess(runRoot(command, batch, 0), "Could not checkpoint sampled pages.");
+    }
+
+    private String collectAndTrain(File helper, List<String> packages, boolean automatic,
+                                   boolean restoring, SharedPreferences preferences)
             throws IOException, InterruptedException, NoSuchAlgorithmException {
-        List<byte[]> pages = new ArrayList<>();
         Set<ByteBuffer> seen = new HashSet<>();
         int[] counts = new int[packages.size()];
         List<String> labels = workloadLabels(packages);
         int nextWorkload = 0;
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         Random random = new Random();
-        while (!mStop && !mCancelled && pages.size() < MAX_PAGES) {
+        if (restoring) restorePages(seen, counts, digest);
+        while (!mStop && !mCancelled && seen.size() < MAX_PAGES) {
             boolean lowMemory = false;
             boolean captured = false;
             Set<String> running = automatic ? runningWorkloads() : null;
             int attempted = 0;
+            List<byte[]> batch = new ArrayList<>();
             for (int visited = 0; visited < packages.size() && attempted < MAX_WORKLOADS
-                    && pages.size() < MAX_PAGES && !mStop && !mCancelled; visited++) {
+                    && seen.size() < MAX_PAGES && !mStop && !mCancelled; visited++) {
                 int i = nextWorkload;
                 nextWorkload = (nextWorkload + 1) % packages.size();
                 String name = packages.get(i);
@@ -322,15 +431,17 @@ public class ZramTrainingService extends Service {
                 requireSuccess(sample, "Could not read " + name + " through KernelSU.");
                 if (sample.bytes.length % PAGE_BYTES != 0)
                     throw new IOException("The sampler returned a partial page.");
-                counts[i] += addPages(sample.bytes, Math.min(ROUND_PAGES, MAX_PAGES - pages.size()),
-                        pages, seen, digest);
+                byte[] source = ByteBuffer.allocate(Integer.BYTES).putInt(i).array();
+                counts[i] += addPages(sample.bytes, Math.min(ROUND_PAGES, MAX_PAGES - seen.size()),
+                        source, batch, seen, digest);
                 captured |= sample.bytes.length > 0;
             }
-            if (!mStop && !mCancelled && pages.size() < MAX_PAGES) {
+            checkpointBatch(batch);
+            if (!mStop && !mCancelled && seen.size() < MAX_PAGES) {
                 String state = lowMemory ? "Paused for low memory."
                         : automatic ? "Auto sampling running workloads."
                         : captured ? "Sampling selected apps." : "Waiting for a selected app to run.";
-                progress(state + " " + pages.size() + " / " + MAX_PAGES + " unique pages.");
+                progress(state + " " + seen.size() + " / " + MAX_PAGES + " unique pages.");
                 long next = SystemClock.elapsedRealtime() + ROUND_INTERVAL_MS;
                 synchronized (mWake) {
                     long remaining;
@@ -342,10 +453,12 @@ public class ZramTrainingService extends Service {
             }
         }
         if (mCancelled) throw new InterruptedException();
-        if (pages.size() < MIN_PAGES)
-            return "Collected " + pages.size() + " unique pages. Training needs at least "
+        int total = seen.size();
+        if (total < MIN_PAGES)
+            return "Collected " + total + " unique pages. Training needs at least "
                     + MIN_PAGES + ".";
-        Collections.shuffle(pages, random);
+        if (!preferences.edit().putBoolean(CHECKPOINT_READY, true).commit())
+            throw new IOException("Could not save the build-ready checkpoint state.");
         Result dictionary;
         List<Integer> sources = topSources(counts);
         List<String> sourceDetails = new ArrayList<>();
@@ -355,7 +468,7 @@ public class ZramTrainingService extends Service {
             filenameParts.add(shortAppName(labels.get(index), packages.get(index)));
         }
         String source = "Top contributors: " + TextUtils.join(", ", sourceDetails) + ".";
-        String ready = pages.size() + " pages ready. Build when the tablet is idle. " + source;
+        String ready = total + " pages ready. Build when the tablet is idle. " + source;
         while (true) {
             synchronized (mWake) {
                 sReady = true;
@@ -368,11 +481,12 @@ public class ZramTrainingService extends Service {
                 sReady = false;
                 sTraining = true;
             }
-            progress("Building a dictionary from " + pages.size() + " pages…");
-            dictionary = runRoot("exec timeout 120 nice -n 10 "
-                    + quote(helper.getPath()) + " train 2>/dev/null", pages, DICTIONARY_BYTES);
+            progress("Building a dictionary from " + total + " pages…");
+            dictionary = runRoot("{ " + checkpointStream() + "; } | timeout 120 nice -n 10 "
+                    + quote(helper.getPath()) + " train-checkpoint " + total + " 2>/dev/null",
+                    null, DICTIONARY_BYTES);
             if (dictionary.code != 2) break;
-            ready = "Tablet is busy or low on memory. " + pages.size() + " pages kept for retry.";
+            ready = "Tablet is busy or low on memory. " + total + " pages kept for retry.";
         }
         requireSuccess(dictionary, dictionary.code == 4
                 ? "The samples could not fill a 16 KiB dictionary."
@@ -383,7 +497,7 @@ public class ZramTrainingService extends Service {
                 + new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US)
                 .format(new Date()) + "-" + UUID.randomUUID().toString().substring(0, 8) + ".dict";
         saveDictionary(name, dictionary.bytes);
-        String report = pages.size() + " pages · " + dictionary.bytes.length + " B. " + source;
+        String report = total + " pages · " + dictionary.bytes.length + " B. " + source;
         PreferenceManager.getDefaultSharedPreferences(this).edit()
                 .putString(DICTIONARY_REPORT + name, report).apply();
         return "Saved " + name + "\n" + report;
@@ -432,8 +546,8 @@ public class ZramTrainingService extends Service {
         return name.substring(0, Math.min(14, name.length())).replaceAll("-$", "");
     }
 
-    private int addPages(byte[] batch, int limit, List<byte[]> pages, Set<ByteBuffer> seen,
-                         MessageDigest digest) {
+    private int addPages(byte[] batch, int limit, byte[] source, List<byte[]> records,
+                         Set<ByteBuffer> seen, MessageDigest digest) {
         int added = 0;
         for (int start = 0; start < batch.length && added < limit; start += PAGE_BYTES) {
             int end = start + PAGE_BYTES;
@@ -442,7 +556,8 @@ public class ZramTrainingService extends Service {
             if (i == end) continue;
             digest.update(batch, start, PAGE_BYTES);
             if (seen.add(ByteBuffer.wrap(digest.digest()))) {
-                pages.add(Arrays.copyOfRange(batch, start, end));
+                records.add(source);
+                records.add(Arrays.copyOfRange(batch, start, end));
                 added++;
             }
         }

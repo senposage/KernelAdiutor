@@ -32,8 +32,12 @@ ZRAM size**. Already active boot swap is left alone. KA keeps the
 contributor report in its settings under the original filename.
 
 Keep dictionaries from personal workloads local. They can contain
-fragments from the selected apps' memory. Raw samples stay in the
-training service's memory and a reboot ends the session.
+fragments from the selected apps' memory. Complete rounds are checkpointed
+in a root-only tmpfs directory. If Android kills KA, the trainer can
+resume from the last complete round when the service restarts. If Android
+leaves the service stopped, reopen KA and tap **Resume LZ4 training**.
+Saving or discarding a session clears its checkpoint. A tablet reboot
+clears all volatile checkpoints.
 
 ## Build
 
@@ -59,6 +63,10 @@ Full-capacity update: `E:\KA-Trainer-Full.apk`
 
 APK SHA-256: `d6999647791e970eef4fa8b661afcb82167dba0cdf98a81ad3780d253462458e`
 
+Checkpoint recovery update: `E:\KA-Trainer-Resume.apk`
+
+APK SHA-256: `950af4c4a0939b5bf22ff09f6aaf3aa0805605aa2cc49ea6b5e08e8141ca6a63`
+
 ## Verification
 
 - The ZRAM setup harness passed named-file selection, plain LZ4,
@@ -75,3 +83,12 @@ APK SHA-256: `d6999647791e970eef4fa8b661afcb82167dba0cdf98a81ad3780d253462458e`
   entry. The ZRAM setup harness passed again.
 - The full-capacity trainer produced exactly 16,384 raw bytes from 2,048
   synthetic pages in WSL, and an LZ4 compression round trip passed.
+- On the tablet, a synthetic checkpoint rejected a partial write,
+  committed a complete record atomically, and prevented reads from
+  the unprivileged KA UID. In WSL, the native trainer rejected short
+  and oversized checkpoint streams and emitted a full 16 KiB dictionary
+  from 2,048 complete records.
+- Android reported `LOW_MEMORY` for the original sampler exit. The
+  running capture was preserved while the recovery build was staged.
+  Android's service restart and UI recovery still need an end-to-end
+  test with the new APK.
