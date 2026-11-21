@@ -62,8 +62,8 @@ public class ZramTrainingService extends Service {
     private static final int MIN_PAGES = 128;
     private static final int BATCH_PAGES = 128;
     private static final int ROUND_PAGES = 32;
-    private static final int WORKLOAD_PAGES = 512;
-    private static final int MAX_PAGES = MAX_WORKLOADS * WORKLOAD_PAGES;
+    private static final int MAX_PAGES = 2048;
+    private static final int DICTIONARY_BYTES = 16 * 1024;
     private static final int ROUND_INTERVAL_MS = 30_000;
     private static final Pattern PACKAGE_NAME =
             Pattern.compile("[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+");
@@ -293,22 +293,20 @@ public class ZramTrainingService extends Service {
         Set<ByteBuffer> seen = new HashSet<>();
         int[] counts = new int[packages.size()];
         List<String> labels = workloadLabels(packages);
-        int target = Math.min(MAX_PAGES, packages.size() * WORKLOAD_PAGES);
         int nextWorkload = 0;
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         Random random = new Random();
-        while (!mStop && !mCancelled && pages.size() < target) {
+        while (!mStop && !mCancelled && pages.size() < MAX_PAGES) {
             boolean lowMemory = false;
             boolean captured = false;
             Set<String> running = automatic ? runningWorkloads() : null;
             int attempted = 0;
             for (int visited = 0; visited < packages.size() && attempted < MAX_WORKLOADS
-                    && pages.size() < target && !mStop && !mCancelled; visited++) {
+                    && pages.size() < MAX_PAGES && !mStop && !mCancelled; visited++) {
                 int i = nextWorkload;
                 nextWorkload = (nextWorkload + 1) % packages.size();
                 String name = packages.get(i);
-                int remaining = Math.min(WORKLOAD_PAGES - counts[i], target - pages.size());
-                if (remaining == 0 || (running != null && !running.contains(name))) continue;
+                if (running != null && !running.contains(name)) continue;
                 attempted++;
                 String command = "pid=$(pidof -s '" + name + "') || exit 3; "
                         + "exec timeout 12 " + quote(helper.getPath()) + " capture \"$pid\" '"
@@ -324,15 +322,15 @@ public class ZramTrainingService extends Service {
                 requireSuccess(sample, "Could not read " + name + " through KernelSU.");
                 if (sample.bytes.length % PAGE_BYTES != 0)
                     throw new IOException("The sampler returned a partial page.");
-                counts[i] += addPages(sample.bytes, Math.min(ROUND_PAGES, remaining),
+                counts[i] += addPages(sample.bytes, Math.min(ROUND_PAGES, MAX_PAGES - pages.size()),
                         pages, seen, digest);
                 captured |= sample.bytes.length > 0;
             }
-            if (!mStop && !mCancelled && pages.size() < target) {
+            if (!mStop && !mCancelled && pages.size() < MAX_PAGES) {
                 String state = lowMemory ? "Paused for low memory."
                         : automatic ? "Auto sampling running workloads."
                         : captured ? "Sampling selected apps." : "Waiting for a selected app to run.";
-                progress(state + " " + pages.size() + " / " + target + " unique pages.");
+                progress(state + " " + pages.size() + " / " + MAX_PAGES + " unique pages.");
                 long next = SystemClock.elapsedRealtime() + ROUND_INTERVAL_MS;
                 synchronized (mWake) {
                     long remaining;
@@ -372,13 +370,15 @@ public class ZramTrainingService extends Service {
             }
             progress("Building a dictionary from " + pages.size() + " pages…");
             dictionary = runRoot("exec timeout 120 nice -n 10 "
-                    + quote(helper.getPath()) + " train 2>/dev/null", pages, 16384);
+                    + quote(helper.getPath()) + " train 2>/dev/null", pages, DICTIONARY_BYTES);
             if (dictionary.code != 2) break;
             ready = "Tablet is busy or low on memory. " + pages.size() + " pages kept for retry.";
         }
-        requireSuccess(dictionary, "The dictionary backend could not build a candidate.");
-        if (dictionary.bytes.length < 8)
-            throw new IOException("The trainer returned an empty dictionary.");
+        requireSuccess(dictionary, dictionary.code == 4
+                ? "The samples could not fill a 16 KiB dictionary."
+                : "The dictionary backend could not build a candidate.");
+        if (dictionary.bytes.length != DICTIONARY_BYTES)
+            throw new IOException("The trainer returned an incomplete dictionary.");
         String name = "zram-" + TextUtils.join("-", filenameParts) + "-"
                 + new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US)
                 .format(new Date()) + "-" + UUID.randomUUID().toString().substring(0, 8) + ".dict";

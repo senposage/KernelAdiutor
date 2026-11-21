@@ -3,9 +3,10 @@
 In Virtual Memory, tap **Train an LZ4 dictionary** and select up to
 four apps. KA takes small samples from resident writable anonymous
 pages in their main processes with a 30-second wait between rounds. It skips
-duplicate and repeated-fill pages and holds at most 512 usable pages
-per selected app. Sampling stops at the quota or with **Stop sampling**.
-At least 128 usable pages are needed to build.
+duplicate and repeated-fill pages and collects up to 2,048 usable pages
+in total, even if a single app supplies them. Sampling stops at that
+limit or with **Stop sampling**. At least 128 usable pages are needed
+to build if you stop early.
 
 Check **Auto** at the top of the workload picker to rotate through running
 launcher app main processes and Android System (`system_server`). In
@@ -16,7 +17,8 @@ in manual mode.
 
 Use **Build when idle** after closing the workload. KA checks idle CPU
 time and available RAM before building. If the tablet is too busy, it
-keeps the samples in memory so you can retry. The notification shows
+keeps the samples in memory so you can retry. A successful build saves
+exactly 16 KiB of trained LZ4 content. The notification shows
 progress and has actions to stop sampling, build, or discard the samples.
 After completion it can start another session with the same apps.
 
@@ -53,6 +55,10 @@ APK SHA-256: `f57d35746fc1b4a588e5118991671d402a1a033229db84f9990dbd6e2d0fa314`
 
 APK SHA-256: `bff83eb14346d129b9e4caec26b2cc2e9d39b65093e9a50aabf417b2d1880d09`
 
+Full-capacity update: `E:\KA-Trainer-Full.apk`
+
+APK SHA-256: `d6999647791e970eef4fa8b661afcb82167dba0cdf98a81ad3780d253462458e`
+
 ## Verification
 
 - The ZRAM setup harness passed named-file selection, plain LZ4,
@@ -67,3 +73,5 @@ APK SHA-256: `bff83eb14346d129b9e4caec26b2cc2e9d39b65093e9a50aabf417b2d1880d09`
 - The Auto update was installed on the T227U. The workload picker
   showed the Auto checkbox, exclusion mode, and the Android System
   entry. The ZRAM setup harness passed again.
+- The full-capacity trainer produced exactly 16,384 raw bytes from 2,048
+  synthetic pages in WSL, and an LZ4 compression round trip passed.

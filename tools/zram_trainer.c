@@ -177,7 +177,8 @@ static int train(void)
     size_t sizes[MAX_PAGES];
     for (size_t i = 0; i < pages; ++i)
         sizes[i] = PAGE_BYTES;
-    unsigned char dictionary[DICTIONARY_BYTES];
+    /* fastCover includes a Zstandard header, which LZ4 does not use. */
+    unsigned char dictionary[DICTIONARY_BYTES + 2048];
     ZDICT_fastCover_params_t options = {
         .d = 8, .f = 17, .steps = 4, .nbThreads = 1, .accel = 1,
         .splitPoint = 1.0,
@@ -190,10 +191,12 @@ static int train(void)
         return 1;
     }
     size_t header = ZDICT_getDictHeaderSize(dictionary, length);
-    if (ZDICT_isError(header) || header >= length || length - header < 8)
+    if (ZDICT_isError(header) || header >= length)
         return 1;
-    /* LZ4 consumes the content bytes without the Zstandard dictionary header. */
-    return fwrite(dictionary + header, length - header, 1, stdout) == 1 &&
+    if (length - header < DICTIONARY_BYTES)
+        return 4;
+    /* Keep the tail of the trained content that LZ4 would prioritize. */
+    return fwrite(dictionary + length - DICTIONARY_BYTES, DICTIONARY_BYTES, 1, stdout) == 1 &&
            fflush(stdout) == 0 ? 0 : 1;
 }
 
