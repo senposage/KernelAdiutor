@@ -20,11 +20,17 @@
 package com.grarak.kerneladiutor.utils.kernel.vm;
 
 import android.content.Context;
+import android.preference.PreferenceManager;
 
 import com.grarak.kerneladiutor.fragments.ApplyOnBootFragment;
 import com.grarak.kerneladiutor.utils.Utils;
 import com.grarak.kerneladiutor.utils.root.Control;
+import com.grarak.kerneladiutor.utils.root.RootUtils;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -40,7 +46,11 @@ public class ZRAM {
     private static final String MAX_COMP_STREAMS = "/sys/block/zram0/max_comp_streams";
     private static final String COMP_ALGORITHM = "/sys/block/zram0/comp_algorithm";
     private static final String COMP_DICTIONARY_SIZE = ZRAM + "/comp_dictionary_size";
-    public static final String DICTIONARY_FILE = "/sdcard/Download/KernelAdiutor/zram-lz4.dict";
+    public static final String DICTIONARY_DIRECTORY = "/sdcard/Download/KernelAdiutor";
+    public static final String DICTIONARY_BACKING_DIRECTORY = "/data/media/0/Download/KernelAdiutor";
+    private static final String DICTIONARY_PREF = "zram_dictionary";
+    private static final String DEFAULT_DICTIONARY = "zram-lz4.dict";
+    private static final Pattern DICTIONARY_NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._ -]{0,95}\\.dict");
     private static final Pattern SAVED_SIZE = Pattern.compile(
             "^(?:\\(ka_zram_bytes=([0-9]+);|echo '([0-9]+)' > /sys/block/zram0/disksize$)");
 
@@ -78,14 +88,49 @@ public class ZRAM {
         if (context == null || bytes < 0 || bytes > 2048L * 1024L * 1024L) return null;
         String script = Utils.readAssetFile(context, "t227u_zram_setup.sh");
         if (script == null || script.isEmpty()) return null;
+        String dictionary = selectedDictionary(context);
         return "(ka_zram_bytes=" + bytes + ";\n"
                 + "ka_zram_boot=" + (boot ? 1 : 0) + "\n"
                 + "ka_zram_dir='" + ZRAM + "'\n"
                 + "ka_zram_block='" + BLOCK + "'\n"
                 + "ka_zram_proc_swaps='/proc/swaps'\n"
-                + "ka_zram_dictionary='" + DICTIONARY_FILE + "'\n"
-                + "ka_zram_dictionary_fallback='/data/media/0/Download/KernelAdiutor/zram-lz4.dict'\n"
+                + "ka_zram_dictionary='" + dictionaryPath(DICTIONARY_DIRECTORY, dictionary) + "'\n"
+                + "ka_zram_dictionary_fallback='"
+                + dictionaryPath(DICTIONARY_BACKING_DIRECTORY, dictionary) + "'\n"
                 + script + "\n)";
+    }
+
+    private static String dictionaryPath(String directory, String name) {
+        return name.isEmpty() ? "" : directory + "/" + name;
+    }
+
+    public static String selectedDictionary(Context context) {
+        String name = PreferenceManager.getDefaultSharedPreferences(context)
+                .getString(DICTIONARY_PREF, DEFAULT_DICTIONARY);
+        return DICTIONARY_NAME.matcher(name).matches() ? name : "";
+    }
+
+    public static void selectDictionary(Context context, String name) {
+        if (name.isEmpty() || DICTIONARY_NAME.matcher(name).matches()) {
+            PreferenceManager.getDefaultSharedPreferences(context).edit()
+                    .putString(DICTIONARY_PREF, name).apply();
+        }
+    }
+
+    public static List<String> listDictionaries() {
+        String output = RootUtils.runCommand("for f in '" + DICTIONARY_DIRECTORY + "'/*.dict '"
+                + DICTIONARY_BACKING_DIRECTORY + "'/*.dict; do "
+                + "[ -f \"$f\" ] && [ ! -L \"$f\" ] || continue; "
+                + "size=$(stat -c %s \"$f\") || continue; "
+                + "[ \"$size\" -ge 8 ] && [ \"$size\" -le 65536 ] || continue; "
+                + "printf '%s\\n' \"${f##*/}\"; done");
+        Set<String> names = new TreeSet<>();
+        if (output != null) {
+            for (String name : output.split("\\r?\\n")) {
+                if (DICTIONARY_NAME.matcher(name).matches()) names.add(name);
+            }
+        }
+        return new ArrayList<>(names);
     }
 
     public static int getDisksize() {

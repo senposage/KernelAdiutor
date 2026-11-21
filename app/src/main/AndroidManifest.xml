@@ -88,6 +88,7 @@
         <receiver android:name=".services.boot.ApplyOnBoot$CancelReceiver" />
 
         <service android:name=".services.monitor.Monitor" />
+        <service android:name=".services.ZramTrainingService" android:exported="false" />
         <receiver android:name=".services.monitor.Monitor$DisableReceiver" />
 
         <!-- Profile Widget -->

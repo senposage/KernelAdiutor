@@ -45,6 +45,20 @@ cmp "$work/comp_dictionary" "$ka_zram_dictionary_fallback"
 test "$(cat "$work/actions")" = "$(printf 'mkswap\nswapon')"
 
 fixture
+printf 'default dictionary' > "$ka_zram_dictionary"
+selected="$work/Asphalt sessions.dict"
+printf 'selected dictionary' > "$selected"
+( ka_zram_dictionary=$selected; . "$script" )
+cmp "$work/comp_dictionary" "$selected"
+
+fixture
+printf 'default dictionary' > "$ka_zram_dictionary"
+( ka_zram_dictionary=; ka_zram_dictionary_fallback=; . "$script" )
+test "$(cat "$work/comp_dictionary_size")" = 0
+test ! -s "$work/comp_dictionary"
+rm "$selected"
+
+fixture
 ( . "$script" )
 test "$(cat "$work/comp_dictionary_size")" = 0
 test "$(cat "$work/disksize")" = "$ka_zram_bytes"
@@ -77,4 +91,4 @@ if ( . "$script" ); then
 fi
 test "$(cat "$work/actions")" = swapoff
 test "$(cat "$work/reset")" = 0
-printf 'PASS: staging, fallback, boot protection and failed swapoff\n'
+printf 'PASS: named and plain selection, staging, fallback, boot protection and failed swapoff\n'

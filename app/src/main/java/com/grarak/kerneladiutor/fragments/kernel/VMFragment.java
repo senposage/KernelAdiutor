@@ -19,11 +19,18 @@
  */
 package com.grarak.kerneladiutor.fragments.kernel;
 
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
+import android.support.v7.app.AlertDialog;
 import android.text.InputType;
 
 import com.grarak.kerneladiutor.R;
 import com.grarak.kerneladiutor.fragments.ApplyOnBootFragment;
 import com.grarak.kerneladiutor.fragments.recyclerview.RecyclerViewFragment;
+import com.grarak.kerneladiutor.services.ZramTrainingService;
+import com.grarak.kerneladiutor.utils.Utils;
 import com.grarak.kerneladiutor.utils.kernel.vm.VM;
 import com.grarak.kerneladiutor.utils.kernel.vm.ZRAM;
 import com.grarak.kerneladiutor.utils.kernel.vm.ZSwap;
@@ -36,7 +43,10 @@ import com.grarak.kerneladiutor.views.recyclerview.SwitchView;
 import com.grarak.kerneladiutor.views.recyclerview.TitleView;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Created by willi on 29.06.16.
@@ -47,6 +57,7 @@ public class VMFragment extends RecyclerViewFragment {
     private List<Integer> mVMPositions = new ArrayList<>();
     private int mPendingZramSize;
     private boolean mZramResizeInProgress;
+    private DescriptionView mTrainer;
 
     @Override
     protected void init() {
@@ -57,6 +68,7 @@ public class VMFragment extends RecyclerViewFragment {
 
     @Override
     protected void addItems(List<RecyclerViewItem> items) {
+        mTrainer = null;
         mVMs.clear();
         mVMPositions.clear();
         for (int i = 0; i < VM.size(); i++) {
@@ -121,9 +133,15 @@ public class VMFragment extends RecyclerViewFragment {
         if (ZRAM.supportsDictionary()) {
             DescriptionView dictionary = new DescriptionView();
             dictionary.setTitle("LZ4 dictionary");
-            dictionary.setSummary("Copy zram-lz4.dict to Download/KernelAdiutor and enable "
-                    + "Virtual Memory Apply on Boot. It loads before ZRAM starts.");
+            showDictionarySelection(dictionary);
+            dictionary.setOnItemClickListener(item -> pickDictionary(dictionary));
             items.add(dictionary);
+            if (ZramTrainingService.available(getActivity())) {
+                mTrainer = new DescriptionView();
+                mTrainer.setOnItemClickListener(item -> trainingAction());
+                refresh();
+                items.add(mTrainer);
+            }
         }
 
         DescriptionView apply = new DescriptionView();
@@ -132,6 +150,117 @@ public class VMFragment extends RecyclerViewFragment {
         apply.setOnItemClickListener(item ->
                 applyZramResize(zram, readback, apply));
         items.add(apply);
+    }
+
+    @Override
+    protected void refresh() {
+        Context context = getActivity();
+        if (mTrainer != null && context != null) {
+            CharSequence title = ZramTrainingService.isTraining() ? "Building an LZ4 dictionary"
+                    : ZramTrainingService.isReady() ? "Build an LZ4 dictionary"
+                    : ZramTrainingService.isRunning() ? "Stop sampling" : "Train an LZ4 dictionary";
+            if (!title.equals(mTrainer.getTitle())) mTrainer.setTitle(title);
+            String status = ZramTrainingService.status(context);
+            if (!status.equals(mTrainer.getSummary())) mTrainer.setSummary(status);
+        }
+    }
+
+    private void trainingAction() {
+        Context context = getActivity();
+        if (context == null || ZramTrainingService.isTraining()) return;
+        if (ZramTrainingService.isReady()) {
+            new AlertDialog.Builder(context)
+                    .setTitle("Build dictionary")
+                    .setMessage("Close heavy workloads before building. The candidate is saved "
+                            + "in Download/KernelAdiutor.")
+                    .setPositiveButton("Build", (dialog, which) -> ZramTrainingService.build(context))
+                    .setNeutralButton("Discard samples",
+                            (dialog, which) -> ZramTrainingService.discard(context))
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show();
+        } else if (ZramTrainingService.isRunning()) {
+            ZramTrainingService.stop(context);
+        } else {
+            chooseWorkloads(context);
+        }
+    }
+
+    private void chooseWorkloads(Context context) {
+        PackageManager manager = context.getPackageManager();
+        Intent launcher = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+        List<ResolveInfo> apps = new ArrayList<>(manager.queryIntentActivities(launcher, 0));
+        Collections.sort(apps, new ResolveInfo.DisplayNameComparator(manager));
+        Map<String, String> labels = new LinkedHashMap<>();
+        for (ResolveInfo app : apps) {
+            String name = app.activityInfo.packageName;
+            if (!name.equals(context.getPackageName()) && ZramTrainingService.validPackage(name)) {
+                labels.put(name, app.loadLabel(manager) + "\n" + name);
+            }
+        }
+        List<String> packages = new ArrayList<>(labels.keySet());
+        if (packages.isEmpty()) {
+            Utils.toast("No eligible launcher apps found.", context);
+            return;
+        }
+        boolean[] selected = new boolean[packages.size()];
+        AlertDialog dialog = new AlertDialog.Builder(context)
+                .setTitle("Choose up to four workload apps")
+                .setMultiChoiceItems(labels.values().toArray(new String[0]), selected,
+                        (picker, which, checked) -> selected[which] = checked)
+                .setPositiveButton("Continue", null)
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+        dialog.setOnShowListener(ignored ->
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+                    ArrayList<String> chosen = new ArrayList<>();
+                    for (int i = 0; i < selected.length; i++) {
+                        if (selected[i]) chosen.add(packages.get(i));
+                    }
+                    if (chosen.isEmpty() || chosen.size() > ZramTrainingService.MAX_WORKLOADS) {
+                        Utils.toast("Choose one to four apps.", context);
+                        return;
+                    }
+                    dialog.dismiss();
+                    new AlertDialog.Builder(context)
+                            .setTitle("Start workload sampling")
+                            .setMessage("KA samples memory from your selected running apps. "
+                                    + "A dictionary can contain fragments of that memory. "
+                                    + "Keep personal dictionaries local and stop sampling when done.")
+                            .setPositiveButton("Start sampling",
+                                    (confirm, which) -> ZramTrainingService.start(context, chosen))
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .show();
+                }));
+        dialog.show();
+    }
+
+    private void showDictionarySelection(DescriptionView dictionary) {
+        Context context = getActivity();
+        if (context == null) return;
+        String name = ZRAM.selectedDictionary(context);
+        String report = name.isEmpty() ? "" : ZramTrainingService.dictionaryReport(context, name);
+        dictionary.setSummary((name.isEmpty() ? "Plain LZ4" : name)
+                + " selected for next ZRAM setup. Tap to choose."
+                + (report.isEmpty() ? "" : "\n" + report));
+    }
+
+    private void pickDictionary(DescriptionView dictionary) {
+        Context context = getActivity();
+        if (context == null) return;
+        List<String> names = ZRAM.listDictionaries();
+        names.add(0, "");
+        String[] labels = names.toArray(new String[0]);
+        labels[0] = "Plain LZ4";
+        new AlertDialog.Builder(context)
+                .setTitle("LZ4 dictionaries in Download/KernelAdiutor")
+                .setSingleChoiceItems(labels, names.indexOf(ZRAM.selectedDictionary(context)),
+                        (dialog, which) -> {
+                            ZRAM.selectDictionary(context, names.get(which));
+                            showDictionarySelection(dictionary);
+                            dialog.dismiss();
+                        })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
     }
 
     private String zramReadback() {

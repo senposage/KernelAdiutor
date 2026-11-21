@@ -1,0 +1,3 @@
+/app/src/main/assets/t227u_zram_setup.sh text eol=lf
+/tests/zram_setup_test.sh text eol=lf
+/tools/build_zram_trainer.sh text eol=lf

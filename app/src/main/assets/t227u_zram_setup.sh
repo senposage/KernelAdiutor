@@ -28,11 +28,13 @@ fi
 
 ka_zram_dict_size=0
 # The primary user's backing path is available even if /sdcard is late.
-if [ ! -f "$ka_zram_dictionary" ] && [ -f "$ka_zram_dictionary_fallback" ]; then
+if { [ ! -f "$ka_zram_dictionary" ] || [ -L "$ka_zram_dictionary" ]; } &&
+   [ -f "$ka_zram_dictionary_fallback" ] && [ ! -L "$ka_zram_dictionary_fallback" ]; then
     ka_zram_dictionary=$ka_zram_dictionary_fallback
 fi
 if [ -w "$ka_zram_dir/comp_dictionary_size" ] &&
-   [ -w "$ka_zram_dir/comp_dictionary" ] && [ -f "$ka_zram_dictionary" ]; then
+   [ -w "$ka_zram_dir/comp_dictionary" ] && [ -f "$ka_zram_dictionary" ] &&
+   [ ! -L "$ka_zram_dictionary" ]; then
     ka_zram_length=$(stat -c %s "$ka_zram_dictionary" 2>/dev/null)
     case "$ka_zram_length" in
         ''|*[!0-9]*) ka_zram_length=0 ;;
