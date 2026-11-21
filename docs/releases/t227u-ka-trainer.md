@@ -67,10 +67,12 @@ Checkpoint recovery update: `E:\KA-Trainer-Resume.apk`
 
 APK SHA-256: `950af4c4a0939b5bf22ff09f6aaf3aa0805605aa2cc49ea6b5e08e8141ca6a63`
 
-The same signed APK is staged as `E:\KernelAdiutor-T227U-ZRAM.apk` for
-the [T227U KA prerelease](https://github.com/senposage/KernelAdiutor/releases/tag/t227u-ka-lz4d).
-The tablet disconnected before installation. Install and verify the new
-APK before replacing the published `KA-LZ4D.apk` asset.
+The signed APK is installed on the tablet and published as
+`KernelAdiutor-T227U-ZRAM.apk` in the
+[T227U KA prerelease](https://github.com/senposage/KernelAdiutor/releases/tag/t227u-ka-lz4d).
+The installed and downloaded APK hashes matched `E:\KernelAdiutor-T227U-ZRAM.apk`.
+The active 16,235-byte test dictionary survived the app update with
+zero ZRAM I/O errors.
 
 ## Verification
 
@@ -93,7 +95,6 @@ APK before replacing the published `KA-LZ4D.apk` asset.
   the unprivileged KA UID. In WSL, the native trainer rejected short
   and oversized checkpoint streams and emitted a full 16 KiB dictionary
   from 2,048 complete records.
-- Android reported `LOW_MEMORY` for the original sampler exit. The
-  running capture was preserved while the recovery build was staged.
+- Android reported `LOW_MEMORY` for the original sampler exit.
   Android's service restart and UI recovery still need an end-to-end
-  test with the new APK.
+  test with the recovery APK.
