@@ -915,4 +915,11 @@
     <string name="feature_function_summary">If you don\'t know what this control does, then simply don\'t touch it. Please do a proper research before playing with your expensive hardware.</string>
     <string name="add_new_features">Could you add feature x and y?</string>
     <string name="add_new_features_summary">That\'s hard to say. I try to add all features, but it\'s hard to make this app universal for all devices.</string>
+    <string name="t227_gpu_vcore">Shared VCORE</string>
+    <string name="t227_gpu_vcore_stock">800 mV (stock)</string>
+    <string name="t227_gpu_vcore_readback">Programmed %1$s\nLive %2$s</string>
+    <string name="t227_gpu_vcore_live_gear">%1$s (gear %2$d)</string>
+    <string name="t227_gpu_vcore_mv">%1$s mV</string>
+    <string name="t227_gpu_vcore_unavailable">Unavailable</string>
+    <string name="t227_gpu_vcore_write_failed">VCORE change could not be verified</string>
 </resources>

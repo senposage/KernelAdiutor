@@ -19,6 +19,9 @@
  */
 package com.grarak.kerneladiutor.fragments.kernel;
 
+import android.app.Activity;
+import android.os.AsyncTask;
+
 import com.grarak.kerneladiutor.R;
 import com.grarak.kerneladiutor.fragments.ApplyOnBootFragment;
 import com.grarak.kerneladiutor.fragments.BaseFragment;
@@ -29,6 +32,7 @@ import com.grarak.kerneladiutor.utils.kernel.gpu.GPUFreq;
 import com.grarak.kerneladiutor.utils.kernel.gpu.SimpleGPU;
 import com.grarak.kerneladiutor.utils.kernel.gpu.SuezGPU;
 import com.grarak.kerneladiutor.utils.kernel.gpu.T227GPU;
+import com.grarak.kerneladiutor.views.dialog.Dialog;
 import com.grarak.kerneladiutor.views.recyclerview.CardView;
 import com.grarak.kerneladiutor.views.recyclerview.DescriptionView;
 import com.grarak.kerneladiutor.views.recyclerview.RecyclerViewItem;
@@ -38,6 +42,7 @@ import com.grarak.kerneladiutor.views.recyclerview.SwitchView;
 import com.grarak.kerneladiutor.views.recyclerview.TitleView;
 import com.grarak.kerneladiutor.views.recyclerview.XYGraphView;
 
+import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -60,6 +65,9 @@ public class GPUFragment extends RecyclerViewFragment {
     private int mT227CurrentFrequency;
     private int mT227MaximumFrequencyValue;
     private List<Integer> mT227Frequencies;
+    private DescriptionView mT227VcoreView;
+    private volatile T227GPU.VcoreState mT227Vcore;
+    private boolean mT227VcoreChanging;
     private final List<SuezVoltageView> mSuezVoltageViews = new ArrayList<>();
 
     private PathReaderFragment mGPUGovernorTunableFragment;
@@ -129,7 +137,77 @@ public class GPUFragment extends RecyclerViewFragment {
         mT227MaximumFrequency.setOnItemSelected((selectView, position, item) ->
                 T227GPU.setMaximumFrequency(mT227Frequencies.get(position), getActivity()));
         card.addItem(mT227MaximumFrequency);
+
+        mT227VcoreView = null;
+        if (T227GPU.hasVcoreControl()) {
+            mT227Vcore = T227GPU.readVcore();
+            mT227VcoreView = new DescriptionView();
+            mT227VcoreView.setTitle(getString(R.string.t227_gpu_vcore));
+            mT227VcoreView.setOnItemClickListener(item -> showT227VcorePicker());
+            updateT227VcoreView();
+            card.addItem(mT227VcoreView);
+        }
         items.add(card);
+    }
+
+    private void showT227VcorePicker() {
+        Activity activity = getActivity();
+        T227GPU.VcoreState state = mT227Vcore;
+        if (activity == null || mT227VcoreChanging || state == null || !state.canAdjust()) {
+            return;
+        }
+
+        List<Integer> voltages = T227GPU.getVcoreVoltages();
+        String[] entries = new String[voltages.size()];
+        entries[0] = getString(R.string.t227_gpu_vcore_stock);
+        for (int i = 1; i < entries.length; i++) {
+            entries[i] = formatVcoreVoltage(voltages.get(i));
+        }
+        new Dialog(activity).setTitle(R.string.t227_gpu_vcore)
+                .setItems(entries, (dialog, index) -> applyT227Vcore(activity, voltages.get(index)))
+                .show();
+    }
+
+    private void applyT227Vcore(Activity activity, int microvolts) {
+        if (mT227VcoreChanging) return;
+        mT227VcoreChanging = true;
+        updateT227VcoreView();
+
+        AsyncTask.THREAD_POOL_EXECUTOR.execute(() -> {
+            T227GPU.VcoreState result = T227GPU.setVcore(microvolts);
+            mT227Vcore = result == null ? T227GPU.readVcore() : result;
+            activity.runOnUiThread(() -> {
+                mT227VcoreChanging = false;
+                if (!isAdded()) return;
+                updateT227VcoreView();
+                if (result == null) Utils.toast(R.string.t227_gpu_vcore_write_failed, activity);
+            });
+        });
+    }
+
+    private String formatVcoreVoltage(int microvolts) {
+        if (microvolts <= 0) return getString(R.string.t227_gpu_vcore_unavailable);
+        return getString(R.string.t227_gpu_vcore_mv,
+                NumberFormat.getNumberInstance().format(microvolts / 1000.0));
+    }
+
+    private void updateT227VcoreView() {
+        if (mT227VcoreView == null) return;
+        if (mT227VcoreChanging) {
+            mT227VcoreView.setSummary(getString(R.string.applying));
+            return;
+        }
+        T227GPU.VcoreState state = mT227Vcore;
+        if (state == null) {
+            mT227VcoreView.setSummary(getString(R.string.t227_gpu_vcore_unavailable));
+            return;
+        }
+        String live = formatVcoreVoltage(state.liveUv);
+        if (state.activeGear >= 0) {
+            live = getString(R.string.t227_gpu_vcore_live_gear, live, state.activeGear);
+        }
+        mT227VcoreView.setSummary(getString(R.string.t227_gpu_vcore_readback,
+                formatVcoreVoltage(state.programmedUv), live));
     }
 
     private void suezGpuInit(List<RecyclerViewItem> items) {
@@ -491,6 +569,7 @@ public class GPUFragment extends RecyclerViewFragment {
         if (T227GPU.supported()) {
             mT227CurrentFrequency = T227GPU.getCurrentFrequency();
             mT227MaximumFrequencyValue = T227GPU.getMaximumFrequency();
+            if (mT227VcoreView != null) mT227Vcore = T227GPU.readVcore();
         }
 
         m2dFreq = mGPUFreq.get2dCurFreq();
@@ -538,6 +617,7 @@ public class GPUFragment extends RecyclerViewFragment {
                 mT227MaximumFrequency.setItem((mT227MaximumFrequencyValue / 1000)
                         + getString(R.string.mhz));
             }
+            updateT227VcoreView();
             return;
         }
 
