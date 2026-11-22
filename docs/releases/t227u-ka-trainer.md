@@ -189,3 +189,21 @@ zero ZRAM I/O errors.
   still enforces 825 mV. Build #38 publishes its 900 mV test limit.
 - Local APK E:\KA-266.apk SHA-256
   658ee1f6d2ee7ca63c0667eefe7b5520703bd2a018ae49cfa975fd1a60183f96.
+
+
+## Shared VSRAM in version code 267
+
+- Source commit 5af9306 adds a numeric Shared VSRAM control to
+  the T227U GPU page. It verifies the SRAM regulator readback
+  and floor state after writes, shows the live rail difference,
+  and displays kernel limits when present. The settings are
+  live-only.
+- The host test checked both the #41 and #42 VSRAM responses,
+  mismatch and rejection handling, stock reset, and the existing
+  VCORE behavior. Offline Windows build and same-signer
+  verification passed. Version 267 installed in place while the
+  tablet was still running #41.
+- Local APK E:\KA-SRAM.apk SHA-256
+  c8545b58a71d8e6cda89b5eae9b70ddd4f4352a57a202bad6ca49fbe6d2ba5fc.
+  The kernel owns the rail limit. The 75 mV minimum is introduced
+  in build #42.
