@@ -155,3 +155,21 @@ zero ZRAM I/O errors.
 - Local APK E:\KA-VCORE.apk has SHA-256
   9143cbdd7bda6ac3c1aee5f1c903f83716ae4d6beb03fe090394d597a154f473.
   The APK was staged while the tablet was running Asphalt.
+
+
+## Numeric VCORE input in version code 265
+
+- Source commit 37a51fd replaces the fixed picker with a numeric
+  input in mV. It reads dvfsrc_top_vcore_max_uv from the kernel and
+  falls back to 825 mV for the previous ABI. The preview rounds down
+  to the next valid 6.25 mV hardware step. The kernel readback
+  remains the source for both the programmed and actual values.
+- The host harness verified decimal and comma input, sub-step
+  rounding, both ceilings, out-of-range entries, valid kernel
+  steps through 900 mV, matching and mismatching write readbacks,
+  and the stock reset. Offline build and same-signer verification
+  passed. Installed version code 265 in place on the T227U while
+  it was running kernel build #37.
+- Local E:\KA-265.apk SHA-256
+  5aa1c89e5d86410e71b11bfba8f681c709f4cd571edc451fa4c48960813b8fc4.
+  The 900 mV kernel limit in build #38 was verified on the host.
