@@ -20,7 +20,14 @@
 package com.grarak.kerneladiutor.fragments.kernel;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.os.AsyncTask;
+import android.support.v7.widget.AppCompatEditText;
+import android.text.Editable;
+import android.text.InputType;
+import android.text.TextWatcher;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 
 import com.grarak.kerneladiutor.R;
 import com.grarak.kerneladiutor.fragments.ApplyOnBootFragment;
@@ -68,6 +75,7 @@ public class GPUFragment extends RecyclerViewFragment {
     private DescriptionView mT227VcoreView;
     private volatile T227GPU.VcoreState mT227Vcore;
     private boolean mT227VcoreChanging;
+    private int mT227VcoreMaxUv;
     private final List<SuezVoltageView> mSuezVoltageViews = new ArrayList<>();
 
     private PathReaderFragment mGPUGovernorTunableFragment;
@@ -141,31 +149,77 @@ public class GPUFragment extends RecyclerViewFragment {
         mT227VcoreView = null;
         if (T227GPU.hasVcoreControl()) {
             mT227Vcore = T227GPU.readVcore();
+            mT227VcoreMaxUv = T227GPU.getVcoreMaxUv();
             mT227VcoreView = new DescriptionView();
             mT227VcoreView.setTitle(getString(R.string.t227_gpu_vcore));
-            mT227VcoreView.setOnItemClickListener(item -> showT227VcorePicker());
+            mT227VcoreView.setOnItemClickListener(item -> showT227VcoreInput());
             updateT227VcoreView();
             card.addItem(mT227VcoreView);
         }
         items.add(card);
     }
 
-    private void showT227VcorePicker() {
+    private void showT227VcoreInput() {
         Activity activity = getActivity();
         T227GPU.VcoreState state = mT227Vcore;
         if (activity == null || mT227VcoreChanging || state == null || !state.canAdjust()) {
             return;
         }
 
-        List<Integer> voltages = T227GPU.getVcoreVoltages();
-        String[] entries = new String[voltages.size()];
-        entries[0] = getString(R.string.t227_gpu_vcore_stock);
-        for (int i = 1; i < entries.length; i++) {
-            entries[i] = formatVcoreVoltage(voltages.get(i));
-        }
-        new Dialog(activity).setTitle(R.string.t227_gpu_vcore)
-                .setItems(entries, (dialog, index) -> applyT227Vcore(activity, voltages.get(index)))
+        LinearLayout layout = new LinearLayout(activity);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        int padding = getResources().getDimensionPixelSize(R.dimen.dialog_padding);
+        layout.setPadding(padding, padding, padding, padding);
+
+        TextView range = new TextView(activity);
+        range.setText(getString(R.string.t227_gpu_vcore_range,
+                formatVcoreVoltage(T227GPU.VCORE_STOCK_UV), formatVcoreVoltage(mT227VcoreMaxUv)));
+        layout.addView(range);
+
+        AppCompatEditText input = new AppCompatEditText(activity);
+        input.setSingleLine();
+        input.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        input.setSelectAllOnFocus(true);
+        input.setText(NumberFormat.getNumberInstance().format(state.programmedUv / 1000.0));
+        layout.addView(input);
+
+        TextView preview = new TextView(activity);
+        layout.addView(preview);
+
+        AlertDialog dialog = new Dialog(activity).setTitle(R.string.t227_gpu_vcore)
+                .setView(layout)
+                .setNegativeButton(R.string.cancel, null)
+                .setNeutralButton(R.string.reset, (d, which) ->
+                        applyT227Vcore(activity, T227GPU.VCORE_STOCK_UV))
+                .setPositiveButton(R.string.ok, null)
                 .show();
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+            int target = T227GPU.voltageStepAtOrBelow(input.getText().toString(), mT227VcoreMaxUv);
+            if (target == 0) return;
+            dialog.dismiss();
+            applyT227Vcore(activity, target);
+        });
+        Runnable refreshPreview = () -> {
+            int target = T227GPU.voltageStepAtOrBelow(input.getText().toString(), mT227VcoreMaxUv);
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(target > 0);
+            preview.setText(target == 0
+                    ? getString(R.string.t227_gpu_vcore_invalid)
+                    : getString(R.string.t227_gpu_vcore_preview, formatVcoreVoltage(target)));
+        };
+        input.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+                refreshPreview.run();
+            }
+
+            @Override
+            public void afterTextChanged(Editable editable) {}
+        });
+        input.requestFocus();
+        refreshPreview.run();
     }
 
     private void applyT227Vcore(Activity activity, int microvolts) {

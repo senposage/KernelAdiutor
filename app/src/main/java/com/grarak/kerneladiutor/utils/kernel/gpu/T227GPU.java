@@ -12,8 +12,9 @@ import com.grarak.kerneladiutor.utils.Utils;
 import com.grarak.kerneladiutor.utils.root.Control;
 import com.grarak.kerneladiutor.utils.root.RootUtils;
 
+import java.math.BigDecimal;
+import java.text.DecimalFormatSymbols;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -27,8 +28,10 @@ public final class T227GPU {
     private static final String MAX_FREQ = "/proc/gpufreq/gpufreq_oc_max_freq";
     private static final String TOP_VCORE =
             "/sys/devices/platform/10012000.dvfsrc/helio-dvfsrc/dvfsrc_top_vcore_uv";
-    private static final List<Integer> VCORE_VOLTAGES = Collections.unmodifiableList(
-            Arrays.asList(800000, 806250, 812500, 818750, 825000));
+    public static final int VCORE_STOCK_UV = 800000;
+    private static final int LEGACY_VCORE_MAX_UV = 825000;
+    private static final int VCORE_STEP_UV = 6250;
+    private static final Pattern VCORE_INPUT = Pattern.compile("[\\p{Nd}]+(?:\\.[\\p{Nd}]*)?");
     private static final Pattern VCORE_STATE = Pattern.compile(
             "programmed_uv=(\\d+|unavailable)\\s+live_uv=(-?\\d+)\\s+active_gear=(-?\\d+)");
     private static final Pattern FREQUENCY = Pattern.compile("freq\\s*=\\s*(\\d+)");
@@ -47,7 +50,7 @@ public final class T227GPU {
         }
 
         public boolean canAdjust() {
-            return VCORE_VOLTAGES.contains(programmedUv);
+            return isVcoreStep(programmedUv);
         }
     }
 
@@ -63,8 +66,29 @@ public final class T227GPU {
         return Utils.existFile(TOP_VCORE);
     }
 
-    public static List<Integer> getVcoreVoltages() {
-        return VCORE_VOLTAGES;
+    public static int getVcoreMaxUv() {
+        String limit = Utils.readFile(TOP_VCORE.replace("_uv", "_max_uv"));
+        int maxUv = limit == null ? 0 : Utils.strToInt(limit.trim());
+        return isVcoreStep(maxUv) ? maxUv : LEGACY_VCORE_MAX_UV;
+    }
+
+    public static int voltageStepAtOrBelow(String millivolts, int maxUv) {
+        char separator = DecimalFormatSymbols.getInstance().getDecimalSeparator();
+        String input = millivolts.trim().replace(separator, '.').replace(',', '.');
+        if (!VCORE_INPUT.matcher(input).matches()) return 0;
+
+        BigDecimal microvolts = new BigDecimal(input).movePointRight(3);
+        if (microvolts.compareTo(BigDecimal.valueOf(VCORE_STOCK_UV)) < 0
+                || microvolts.compareTo(BigDecimal.valueOf(maxUv)) > 0) {
+            return 0;
+        }
+        return VCORE_STOCK_UV + (microvolts.intValue() - VCORE_STOCK_UV)
+                / VCORE_STEP_UV * VCORE_STEP_UV;
+    }
+
+    private static boolean isVcoreStep(int microvolts) {
+        return microvolts >= VCORE_STOCK_UV
+                && (microvolts - VCORE_STOCK_UV) % VCORE_STEP_UV == 0;
     }
 
     public static VcoreState readVcore() {
@@ -72,9 +96,9 @@ public final class T227GPU {
     }
 
     public static VcoreState setVcore(int microvolts) {
-        if (!VCORE_VOLTAGES.contains(microvolts)) return null;
+        if (!isVcoreStep(microvolts)) return null;
 
-        int request = microvolts == VCORE_VOLTAGES.get(0) ? 0 : microvolts;
+        int request = microvolts == VCORE_STOCK_UV ? 0 : microvolts;
         VcoreState result = parseVcore(RootUtils.runCommand(
                 Control.write(String.valueOf(request), TOP_VCORE) + " && cat " + TOP_VCORE));
         return result != null && result.programmedUv == microvolts ? result : null;
