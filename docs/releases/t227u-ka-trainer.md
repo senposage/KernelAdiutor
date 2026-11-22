@@ -173,3 +173,19 @@ zero ZRAM I/O errors.
 - Local E:\KA-265.apk SHA-256
   5aa1c89e5d86410e71b11bfba8f681c709f4cd571edc451fa4c48960813b8fc4.
   The 900 mV kernel limit in build #38 was verified on the host.
+
+
+## Kernel-owned VCORE limits in version code 266
+
+- Source commit 6d73198 drops the hard-coded fallback and
+  application-side range enforcement. KA displays the ceiling when
+  the kernel publishes one. It still previews the 6.25 mV hardware
+  step and confirms the kernel readback after a write.
+- An offline Windows build, same-signer verification, and in-place
+  install of version code 266 passed. The host harness passed with
+  a missing limit file, with a 900 mV published limit, and with
+  simulated kernel acceptance and rejection of the requested step.
+  The tablet was running #37 during installation. That kernel
+  still enforces 825 mV. Build #38 publishes its 900 mV test limit.
+- Local APK E:\KA-266.apk SHA-256
+  658ee1f6d2ee7ca63c0667eefe7b5520703bd2a018ae49cfa975fd1a60183f96.
