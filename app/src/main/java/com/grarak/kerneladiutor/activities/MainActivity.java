@@ -54,6 +54,7 @@ import com.grarak.kerneladiutor.utils.kernel.screen.Screen;
 import com.grarak.kerneladiutor.utils.kernel.sound.Sound;
 import com.grarak.kerneladiutor.utils.kernel.thermal.Thermal;
 import com.grarak.kerneladiutor.utils.kernel.wake.Wake;
+import com.grarak.kerneladiutor.utils.root.Control;
 import com.grarak.kerneladiutor.utils.root.RootUtils;
 
 import java.lang.ref.WeakReference;
@@ -170,6 +171,7 @@ public class MainActivity extends BaseActivity {
             MainActivity activity = mRefActivity.get();
             if (activity == null) return;
 
+            Control.removeLegacyT227UCpuOnlineSettings(activity);
             Battery.getInstance(activity);
             CPUBoost.getInstance();
 

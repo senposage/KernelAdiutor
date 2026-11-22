@@ -26,9 +26,14 @@ import android.content.ServiceConnection;
 import android.os.IBinder;
 
 import com.grarak.kerneladiutor.database.Settings;
+import com.grarak.kerneladiutor.fragments.ApplyOnBootFragment;
 import com.grarak.kerneladiutor.services.monitor.Monitor;
 import com.grarak.kerneladiutor.utils.Log;
+import com.grarak.kerneladiutor.utils.kernel.cpu.T227UDVFS;
 
+import org.json.JSONException;
+
+import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.concurrent.Executor;
@@ -140,6 +145,21 @@ public class Control {
 
     public static void runSetting(String command, String category, String id, Context context) {
         getInstance().run(command, category, id, context);
+    }
+
+    public static void removeLegacyT227UCpuOnlineSettings(Context context) {
+        Context app = context.getApplicationContext();
+        getInstance().mExecutor.execute(() -> {
+            if (!T227UDVFS.supported()) return;
+            try {
+                int removed = Settings.removeLegacyT227UCpuOnlineSettings(app, ApplyOnBootFragment.CPU);
+                if (removed > 0) {
+                    Log.i(TAG, "Removed " + removed + " legacy T227U CPU online settings");
+                }
+            } catch (IOException | JSONException e) {
+                Log.e(TAG, "Could not migrate T227U CPU online settings");
+            }
+        });
     }
 
     /** Remove an obsolete persisted setting without running a replacement command. */

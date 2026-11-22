@@ -74,6 +74,7 @@ public class ApplyOnBoot {
             AppSettings.resetCoreCtlMinCpusBig(service);
         }
 
+        Control.removeLegacyT227UCpuOnlineSettings(service);
         boolean enabled = false;
         final Settings settings = new Settings(service);
         Controls controls = new Controls(service);

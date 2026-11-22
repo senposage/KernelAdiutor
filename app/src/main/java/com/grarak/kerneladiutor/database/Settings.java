@@ -22,11 +22,16 @@ package com.grarak.kerneladiutor.database;
 import android.content.Context;
 
 import com.grarak.kerneladiutor.utils.Utils;
+import com.grarak.kerneladiutor.utils.kernel.cpu.T227UDVFS;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -35,13 +40,15 @@ import java.util.List;
  */
 public class Settings extends Provider {
 
+    private static final String SETTINGS_FILE = "settings.json";
+
     /**
      * Read the JSON file from cache
      *
      * @param context needed to get the cache directory
      */
     public Settings(Context context) {
-        super(context.getFilesDir() + "/settings.json", 1);
+        super(new File(context.getFilesDir(), SETTINGS_FILE).getPath(), 1);
 
         if (Utils.existFile(context.getFilesDir() + "/commands.json", false)) {
             new File(context.getFilesDir() + "/commands.json").delete();
@@ -71,6 +78,45 @@ public class Settings extends Provider {
             items.add((SettingsItem) jsonItem);
         }
         return items;
+    }
+
+    /** Runs on the settings writer's executor. Keep the original file on write failure. */
+    public static int removeLegacyT227UCpuOnlineSettings(Context context, String cpuCategory)
+            throws IOException, JSONException {
+        File settings = new File(context.getFilesDir(), SETTINGS_FILE);
+        String text = Utils.readFile(settings.getPath(), false);
+        if (text == null) return 0;
+
+        JSONObject database = new JSONObject(text);
+        if (database.optInt("version") != 1) return 0;
+
+        JSONArray entries = database.getJSONArray("database");
+        JSONArray kept = new JSONArray();
+        for (int i = 0; i < entries.length(); i++) {
+            JSONObject item = entries.optJSONObject(i);
+            if (item != null && cpuCategory.equals(item.optString("category"))
+                    && T227UDVFS.isLegacyOnlineCommand(item.optString("setting"))) {
+                continue;
+            }
+            kept.put(entries.get(i));
+        }
+        int removed = entries.length() - kept.length();
+        if (removed == 0) return 0;
+
+        database.put("database", kept);
+        File temporary = File.createTempFile("settings-t227u-", ".json", context.getFilesDir());
+        try {
+            try (FileOutputStream stream = new FileOutputStream(temporary)) {
+                stream.write(database.toString().getBytes(Charset.forName("UTF-8")));
+                stream.getFD().sync();
+            }
+            if (!temporary.renameTo(settings)) {
+                throw new IOException("Could not replace " + SETTINGS_FILE);
+            }
+        } finally {
+            temporary.delete();
+        }
+        return removed;
     }
 
     public static class SettingsItem extends DBJsonItem {

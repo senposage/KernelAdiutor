@@ -119,3 +119,19 @@ zero ZRAM I/O errors.
   an in-place ADB install succeeded with all eight CPUs online.
 - Local APK E:\KA-T227U-CPU.apk has SHA-256
   4dc4ab8d583d8afbe0cf667dcb95ec5fa2314060acfa97a3d20ed4855fa96317.
+
+### Automatic cleanup in version code 263
+
+- On T227U launch and Apply on Boot, KA queues a migration on its
+  settings writer. It removes old CPU online and chmod commands
+  from the CPU boot settings. The update writes to a temporary file
+  and renames it after syncing. A run with no matching records leaves
+  the file untouched.
+- The matcher identified all 18 obsolete entries in the archived
+  tablet profile, and the remaining profile matched the original
+  manual cleanup. An in-place update on the tablet removed two
+  harmless seeded records on launch, preserved all 32 existing
+  settings, and left CPUs 0–7 online.
+- Windows offline debug build and same-signer APK verification passed.
+  Local APK E:\KA-T227U-263.apk has SHA-256
+  5cc1d0674d195087dd1156e0f19f85aeb4942b2eb33e1cd87744a4cc1ce3dfd8.
