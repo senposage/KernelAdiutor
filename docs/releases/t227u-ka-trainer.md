@@ -98,3 +98,24 @@ zero ZRAM I/O errors.
 - Android reported `LOW_MEMORY` for the original sampler exit.
   Android's service restart and UI recovery still need an end-to-end
   test with the recovery APK.
+
+## T227U CPU hotplug recovery
+
+- On build #30, the tablet reported CPUs 0, 5, and 6 online.
+  The KA settings still held 18 writes and permission changes for
+  legacy per-core online controls. The saved commands disabled CPUs
+  1–4 and 7 and gave those sysfs nodes read-only permissions.
+- The settings were backed up and those 18 records were removed on the
+  tablet. The CPU node permissions were restored and all eight CPUs
+  came online. An unpinned eight-worker run advanced all eight CPU
+  counters, including CPUs 4–7.
+- Apply on Boot now skips the old T227U CPU online and permission
+  commands. Legacy governor records resolve to the stable cluster
+  policy path, and current T227U governor controls use that path.
+  CPU usage reads the numeric CPU ID from each /proc/stat row.
+- The host check covered missing CPU rows, a CPU coming online
+  between samples, and command matching. The Windows offline debug
+  build passed. The APK signer matched the previous T227U APK, and
+  an in-place ADB install succeeded with all eight CPUs online.
+- Local APK E:\KA-T227U-CPU.apk has SHA-256
+  4dc4ab8d583d8afbe0cf667dcb95ec5fa2314060acfa97a3d20ed4855fa96317.

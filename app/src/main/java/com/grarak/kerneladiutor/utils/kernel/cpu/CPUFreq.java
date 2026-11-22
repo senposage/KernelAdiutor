@@ -760,72 +760,61 @@ public class CPUFreq {
     }
 
     public float[] getCpuUsage() throws InterruptedException {
-        Usage[] prevUsage = getUsages();
+        Usage[] previous = getUsages();
         Thread.sleep(500);
-        Usage[] usage = getUsages();
+        Usage[] current = getUsages();
+        if (previous == null || current == null) return null;
 
-        if (prevUsage != null && usage != null) {
-            float[] pers = new float[prevUsage.length];
-            for (int i = 0; i < prevUsage.length; i++) {
-                float prevIdle = prevUsage[i].getIdle();
-                float prevUp = prevUsage[i].getUptime();
-
-                float idle = usage[i].getIdle();
-                float up = usage[i].getUptime();
-
-                float cpu = (up - prevUp) / ((up + idle) - (prevUp + prevIdle)) * 100;
-                pers[i] = cpu < 0 ? 0 : cpu > 100 ? 100 : cpu;
+        float[] percentages = new float[previous.length];
+        for (int i = 0; i < previous.length; i++) {
+            if (previous[i] == null || current[i] == null) continue;
+            long busy = current[i].busy - previous[i].busy;
+            long idle = current[i].idle - previous[i].idle;
+            if (busy >= 0 && idle >= 0 && busy + idle > 0) {
+                percentages[i] = 100f * busy / (busy + idle);
             }
-            return pers;
         }
-
-        return null;
+        return percentages;
     }
 
     private Usage[] getUsages() {
         String stat = Utils.readFile("/proc/stat");
         if (stat == null) return null;
-        String[] stats = stat.split("\\r?\\n");
 
         Usage[] usage = new Usage[getCpuCount() + 1];
-        for (int i = 0; i < usage.length; i++) {
-            if (i >= stats.length) return null;
-            usage[i] = new Usage(stats[i]);
+        for (String line : stat.split("\\r?\\n")) {
+            if (!line.startsWith("cpu")) break;
+            String[] fields = line.split("\\s+", 10);
+            if (fields.length < 5) continue;
+
+            // Slot zero is the aggregate. Offline CPUs can be missing from /proc/stat.
+            int slot = fields[0].equals("cpu") ? 0
+                    : Utils.strToInt(fields[0].substring(3)) + 1;
+            if (slot < 0 || slot >= usage.length) continue;
+
+            long busy = 0;
+            long idle = 0;
+            for (int i = 1; i < Math.min(fields.length, 9); i++) {
+                long ticks = Utils.strToLong(fields[i]);
+                if (i == 4 || i == 5) {
+                    idle += ticks;
+                } else {
+                    busy += ticks;
+                }
+            }
+            usage[slot] = new Usage(busy, idle);
         }
-        return usage;
+        return usage[0] == null ? null : usage;
     }
 
-    private class Usage {
+    private static final class Usage {
+        private final long busy;
+        private final long idle;
 
-        private long[] stats;
-
-        private Usage(String stats) {
-            if (stats == null) return;
-
-            String[] values = stats.replaceAll("\\s{2,}", " ").trim().split(" ");
-            this.stats = new long[values.length - 1];
-            for (int i = 0; i < this.stats.length; i++) {
-                this.stats[i] = Utils.strToLong(values[i + 1]);
-            }
+        private Usage(long busy, long idle) {
+            this.busy = busy;
+            this.idle = idle;
         }
-
-        public long getUptime() {
-            if (stats == null) return 0;
-            long l = 0;
-            for (int i = 0; i < stats.length - 2; i++) {
-                if (i != 3 && i != 4) l += stats[i];
-            }
-            return l;
-        }
-
-        private long getIdle() {
-            try {
-                return stats == null ? 0 : stats[3] + stats[4];
-            } catch (ArrayIndexOutOfBoundsException e) {
-                return 0;
-            }
-        }
-
     }
 
     private void run(String command, String id, Context context) {

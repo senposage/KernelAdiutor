@@ -43,6 +43,7 @@ import com.grarak.kerneladiutor.utils.Utils;
 import com.grarak.kerneladiutor.utils.kernel.cpu.CPUFreq;
 import com.grarak.kerneladiutor.utils.kernel.cpu.MSMPerformance;
 import com.grarak.kerneladiutor.utils.kernel.cpu.SuezDVFS;
+import com.grarak.kerneladiutor.utils.kernel.cpu.T227UDVFS;
 import com.grarak.kerneladiutor.utils.kernel.vm.ZRAM;
 import com.grarak.kerneladiutor.utils.kernel.cpuhotplug.CoreCtl;
 import com.grarak.kerneladiutor.utils.kernel.cpuhotplug.MPDecision;
@@ -206,12 +207,17 @@ public class ApplyOnBoot {
                     }
                 }
                 boolean zramQueued = false;
+                boolean t227u = T227UDVFS.supported();
                 for (Settings.SettingsItem item : savedSettings) {
                     String category = item.getCategory();
                     String setting = item.getSetting();
                     String id = item.getId();
                     CPUFreq.ApplyCpu applyCpu;
                     if (Boolean.TRUE.equals(mCategoryEnabled.get(category))) {
+                        if (t227u && ApplyOnBootFragment.CPU.equals(category)
+                                && T227UDVFS.isLegacyOnlineCommand(setting)) {
+                            continue;
+                        }
                         if (zramBootCommand != null && ApplyOnBootFragment.VM.equals(category)
                                 && ZRAM.isSetupSetting(id)) {
                             if (!zramQueued && ZRAM.isSizeSetting(id)) {
@@ -271,6 +277,9 @@ public class ApplyOnBoot {
 
                 List<String> profileCommands = new ArrayList<>();
                 for (String command : mProfiles) {
+                    if (t227u && T227UDVFS.isLegacyOnlineCommand(command)) {
+                        continue;
+                    }
                     CPUFreq.ApplyCpu applyCpu;
                     if (command.startsWith("#")
                             && ((applyCpu =
@@ -317,6 +326,13 @@ public class ApplyOnBoot {
 
     private static List<String> getApplyCpu(CPUFreq.ApplyCpu applyCpu, RootUtils.SU su, Context context) {
         List<String> commands = new ArrayList<>();
+        if (T227UDVFS.supported() && T227UDVFS.isLegacyGovernorPath(applyCpu.getPath())) {
+            commands.add(Control.write(applyCpu.getValue(), T227UDVFS.getGovernorPath(applyCpu.getMin())));
+            if (T227UDVFS.isLPolicy(applyCpu.getMin()) && !T227UDVFS.isLPolicy(applyCpu.getMax())) {
+                commands.add(Control.write(applyCpu.getValue(), T227UDVFS.getGovernorPath(applyCpu.getMax())));
+            }
+            return commands;
+        }
         boolean cpulock = Utils.existFile(CPUFreq.CPU_LOCK_FREQ, su);
         if (cpulock) {
             commands.add(Control.write("0", CPUFreq.CPU_LOCK_FREQ));

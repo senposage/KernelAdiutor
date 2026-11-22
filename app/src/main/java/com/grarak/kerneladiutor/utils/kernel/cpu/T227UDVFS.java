@@ -10,6 +10,8 @@ import android.content.Context;
 import com.grarak.kerneladiutor.utils.Utils;
 import com.grarak.kerneladiutor.utils.root.Control;
 
+import java.util.regex.Pattern;
+
 /**
  * MT6765 (T227U) DVFS policy helpers.
  *
@@ -26,16 +28,15 @@ public final class T227UDVFS {
             "/proc/cpufreq/MT_CPU_DVFS_LL/cpufreq_oc_max_freq";
     private static final String LL_MIN =
             "/proc/cpufreq/MT_CPU_DVFS_LL/cpufreq_oc_min_freq";
-    private static final String CPU_SCALING_GOVERNOR =
+    private static final String CPU_POLICY = "/sys/devices/system/cpu/cpufreq/policy%d";
+    private static final String LEGACY_CPU_GOVERNOR =
             "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_governor";
-    private static final String CPU_AVAILABLE_GOVERNORS =
-            "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_available_governors";
+    private static final Pattern LEGACY_CPU_ONLINE_COMMAND = Pattern.compile(
+            "(?:echo '[01]' > |chmod [0-7]{3,4} )/sys/devices/system/cpu/cpu[0-7]/online");
     private static final String LEGACY_CPU_MAX_FREQ =
             "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_max_freq";
     private static final String LEGACY_CPU_MIN_FREQ =
             "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_min_freq";
-    private static final String CPU_GOVERNOR_TUNABLES_CORE =
-            "/sys/devices/system/cpu/cpu%d/cpufreq/%s";
     private static final String CPU_GOVERNOR_TUNABLES =
             "/sys/devices/system/cpu/cpufreq/%s";
 
@@ -86,7 +87,15 @@ public final class T227UDVFS {
     }
 
     public static String getGovernorPath(int cpu) {
-        return Utils.strFormat(CPU_SCALING_GOVERNOR, getPolicyCpu(cpu));
+        return Utils.strFormat(CPU_POLICY, getPolicyCpu(cpu)) + "/scaling_governor";
+    }
+
+    public static boolean isLegacyGovernorPath(String path) {
+        return LEGACY_CPU_GOVERNOR.equals(path);
+    }
+
+    public static boolean isLegacyOnlineCommand(String command) {
+        return LEGACY_CPU_ONLINE_COMMAND.matcher(command).matches();
     }
 
     public static String getGovernor(int cpu) {
@@ -100,14 +109,14 @@ public final class T227UDVFS {
     }
 
     public static String getGovernorTunablesPath(int cpu, String governor) {
-        String policyPath = Utils.strFormat(CPU_GOVERNOR_TUNABLES_CORE,
-                getPolicyCpu(cpu), governor);
+        String policyPath = Utils.strFormat(CPU_POLICY, getPolicyCpu(cpu)) + "/" + governor;
         if (Utils.existFile(policyPath)) return policyPath;
         return Utils.strFormat(CPU_GOVERNOR_TUNABLES, governor);
     }
 
     public static String getAvailableGovernors(int cpu) {
-        return Utils.readFile(Utils.strFormat(CPU_AVAILABLE_GOVERNORS, getPolicyCpu(cpu)));
+        return Utils.readFile(Utils.strFormat(CPU_POLICY, getPolicyCpu(cpu))
+                + "/scaling_available_governors");
     }
 
     /**
