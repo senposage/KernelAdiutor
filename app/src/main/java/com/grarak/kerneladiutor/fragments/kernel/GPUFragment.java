@@ -75,7 +75,6 @@ public class GPUFragment extends RecyclerViewFragment {
     private DescriptionView mT227VcoreView;
     private volatile T227GPU.VcoreState mT227Vcore;
     private boolean mT227VcoreChanging;
-    private int mT227VcoreMaxUv;
     private final List<SuezVoltageView> mSuezVoltageViews = new ArrayList<>();
 
     private PathReaderFragment mGPUGovernorTunableFragment;
@@ -149,7 +148,6 @@ public class GPUFragment extends RecyclerViewFragment {
         mT227VcoreView = null;
         if (T227GPU.hasVcoreControl()) {
             mT227Vcore = T227GPU.readVcore();
-            mT227VcoreMaxUv = T227GPU.getVcoreMaxUv();
             mT227VcoreView = new DescriptionView();
             mT227VcoreView.setTitle(getString(R.string.t227_gpu_vcore));
             mT227VcoreView.setOnItemClickListener(item -> showT227VcoreInput());
@@ -171,9 +169,10 @@ public class GPUFragment extends RecyclerViewFragment {
         int padding = getResources().getDimensionPixelSize(R.dimen.dialog_padding);
         layout.setPadding(padding, padding, padding, padding);
 
+        int maxUv = T227GPU.getVcoreMaxUv();
         TextView range = new TextView(activity);
-        range.setText(getString(R.string.t227_gpu_vcore_range,
-                formatVcoreVoltage(T227GPU.VCORE_STOCK_UV), formatVcoreVoltage(mT227VcoreMaxUv)));
+        range.setText(maxUv > 0 ? getString(R.string.t227_gpu_vcore_kernel_limit,
+                formatVcoreVoltage(maxUv)) : getString(R.string.t227_gpu_vcore_input));
         layout.addView(range);
 
         AppCompatEditText input = new AppCompatEditText(activity);
@@ -194,13 +193,13 @@ public class GPUFragment extends RecyclerViewFragment {
                 .setPositiveButton(R.string.ok, null)
                 .show();
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
-            int target = T227GPU.voltageStepAtOrBelow(input.getText().toString(), mT227VcoreMaxUv);
+            int target = T227GPU.voltageStepAtOrBelow(input.getText().toString());
             if (target == 0) return;
             dialog.dismiss();
             applyT227Vcore(activity, target);
         });
         Runnable refreshPreview = () -> {
-            int target = T227GPU.voltageStepAtOrBelow(input.getText().toString(), mT227VcoreMaxUv);
+            int target = T227GPU.voltageStepAtOrBelow(input.getText().toString());
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(target > 0);
             preview.setText(target == 0
                     ? getString(R.string.t227_gpu_vcore_invalid)

@@ -26,10 +26,10 @@ public final class T227GPU {
     private static final String OPP_DUMP = "/proc/gpufreq/gpufreq_opp_dump";
     private static final String VAR_DUMP = "/proc/gpufreq/gpufreq_var_dump";
     private static final String MAX_FREQ = "/proc/gpufreq/gpufreq_oc_max_freq";
-    private static final String TOP_VCORE =
-            "/sys/devices/platform/10012000.dvfsrc/helio-dvfsrc/dvfsrc_top_vcore_uv";
+    private static final String DVFSRC = "/sys/devices/platform/10012000.dvfsrc/helio-dvfsrc";
+    private static final String TOP_VCORE = DVFSRC + "/dvfsrc_top_vcore_uv";
+    private static final String TOP_VCORE_MAX = DVFSRC + "/dvfsrc_top_vcore_max_uv";
     public static final int VCORE_STOCK_UV = 800000;
-    private static final int LEGACY_VCORE_MAX_UV = 825000;
     private static final int VCORE_STEP_UV = 6250;
     private static final Pattern VCORE_INPUT = Pattern.compile("[\\p{Nd}]+(?:\\.[\\p{Nd}]*)?");
     private static final Pattern VCORE_STATE = Pattern.compile(
@@ -67,28 +67,22 @@ public final class T227GPU {
     }
 
     public static int getVcoreMaxUv() {
-        String limit = Utils.readFile(TOP_VCORE.replace("_uv", "_max_uv"));
-        int maxUv = limit == null ? 0 : Utils.strToInt(limit.trim());
-        return isVcoreStep(maxUv) ? maxUv : LEGACY_VCORE_MAX_UV;
+        String limit = Utils.readFile(TOP_VCORE_MAX);
+        return limit == null ? 0 : Utils.strToInt(limit.trim());
     }
 
-    public static int voltageStepAtOrBelow(String millivolts, int maxUv) {
+    public static int voltageStepAtOrBelow(String millivolts) {
         char separator = DecimalFormatSymbols.getInstance().getDecimalSeparator();
         String input = millivolts.trim().replace(separator, '.').replace(',', '.');
         if (!VCORE_INPUT.matcher(input).matches()) return 0;
 
         BigDecimal microvolts = new BigDecimal(input).movePointRight(3);
-        if (microvolts.compareTo(BigDecimal.valueOf(VCORE_STOCK_UV)) < 0
-                || microvolts.compareTo(BigDecimal.valueOf(maxUv)) > 0) {
-            return 0;
-        }
-        return VCORE_STOCK_UV + (microvolts.intValue() - VCORE_STOCK_UV)
-                / VCORE_STEP_UV * VCORE_STEP_UV;
+        if (microvolts.compareTo(BigDecimal.valueOf(Integer.MAX_VALUE)) > 0) return 0;
+        return microvolts.intValue() / VCORE_STEP_UV * VCORE_STEP_UV;
     }
 
     private static boolean isVcoreStep(int microvolts) {
-        return microvolts >= VCORE_STOCK_UV
-                && (microvolts - VCORE_STOCK_UV) % VCORE_STEP_UV == 0;
+        return microvolts > 0 && microvolts % VCORE_STEP_UV == 0;
     }
 
     public static VcoreState readVcore() {
