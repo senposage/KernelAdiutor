@@ -74,7 +74,9 @@ public class GPUFragment extends RecyclerViewFragment {
     private List<Integer> mT227Frequencies;
     private DescriptionView mT227VcoreView;
     private volatile T227GPU.VcoreState mT227Vcore;
-    private boolean mT227VcoreChanging;
+    private DescriptionView mT227VsramView;
+    private volatile T227GPU.VsramState mT227Vsram;
+    private boolean mT227RailChanging;
     private final List<SuezVoltageView> mSuezVoltageViews = new ArrayList<>();
 
     private PathReaderFragment mGPUGovernorTunableFragment;
@@ -150,18 +152,45 @@ public class GPUFragment extends RecyclerViewFragment {
             mT227Vcore = T227GPU.readVcore();
             mT227VcoreView = new DescriptionView();
             mT227VcoreView.setTitle(getString(R.string.t227_gpu_vcore));
-            mT227VcoreView.setOnItemClickListener(item -> showT227VcoreInput());
+            mT227VcoreView.setOnItemClickListener(item -> showT227RailInput(false));
             updateT227VcoreView();
             card.addItem(mT227VcoreView);
+        }
+
+        mT227VsramView = null;
+        if (T227GPU.hasVsramControl()) {
+            mT227Vsram = T227GPU.readVsram();
+            mT227VsramView = new DescriptionView();
+            mT227VsramView.setTitle(getString(R.string.t227_gpu_vsram));
+            mT227VsramView.setOnItemClickListener(item -> showT227RailInput(true));
+            updateT227VsramView();
+            card.addItem(mT227VsramView);
         }
         items.add(card);
     }
 
-    private void showT227VcoreInput() {
+    private void showT227RailInput(boolean vsram) {
         Activity activity = getActivity();
-        T227GPU.VcoreState state = mT227Vcore;
-        if (activity == null || mT227VcoreChanging || state == null || !state.canAdjust()) {
-            return;
+        if (activity == null || mT227RailChanging) return;
+
+        int voltage;
+        int maxUv;
+        int stockUv;
+        int title;
+        if (vsram) {
+            T227GPU.VsramState state = mT227Vsram;
+            if (state == null || state.vsramUv <= 0) return;
+            voltage = state.vsramUv;
+            maxUv = state.maxUv;
+            stockUv = T227GPU.VSRAM_STOCK_UV;
+            title = R.string.t227_gpu_vsram;
+        } else {
+            T227GPU.VcoreState state = mT227Vcore;
+            if (state == null || !state.canAdjust()) return;
+            voltage = state.programmedUv;
+            maxUv = T227GPU.getVcoreMaxUv();
+            stockUv = T227GPU.VCORE_STOCK_UV;
+            title = R.string.t227_gpu_vcore;
         }
 
         LinearLayout layout = new LinearLayout(activity);
@@ -169,7 +198,6 @@ public class GPUFragment extends RecyclerViewFragment {
         int padding = getResources().getDimensionPixelSize(R.dimen.dialog_padding);
         layout.setPadding(padding, padding, padding, padding);
 
-        int maxUv = T227GPU.getVcoreMaxUv();
         TextView range = new TextView(activity);
         range.setText(maxUv > 0 ? getString(R.string.t227_gpu_vcore_kernel_limit,
                 formatVcoreVoltage(maxUv)) : getString(R.string.t227_gpu_vcore_input));
@@ -179,24 +207,24 @@ public class GPUFragment extends RecyclerViewFragment {
         input.setSingleLine();
         input.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
         input.setSelectAllOnFocus(true);
-        input.setText(NumberFormat.getNumberInstance().format(state.programmedUv / 1000.0));
+        input.setText(NumberFormat.getNumberInstance().format(voltage / 1000.0));
         layout.addView(input);
 
         TextView preview = new TextView(activity);
         layout.addView(preview);
 
-        AlertDialog dialog = new Dialog(activity).setTitle(R.string.t227_gpu_vcore)
+        AlertDialog dialog = new Dialog(activity).setTitle(title)
                 .setView(layout)
                 .setNegativeButton(R.string.cancel, null)
                 .setNeutralButton(R.string.reset, (d, which) ->
-                        applyT227Vcore(activity, T227GPU.VCORE_STOCK_UV))
+                        applyT227Rail(activity, vsram, stockUv))
                 .setPositiveButton(R.string.ok, null)
                 .show();
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
             int target = T227GPU.voltageStepAtOrBelow(input.getText().toString());
             if (target == 0) return;
             dialog.dismiss();
-            applyT227Vcore(activity, target);
+            applyT227Rail(activity, vsram, target);
         });
         Runnable refreshPreview = () -> {
             int target = T227GPU.voltageStepAtOrBelow(input.getText().toString());
@@ -221,32 +249,43 @@ public class GPUFragment extends RecyclerViewFragment {
         refreshPreview.run();
     }
 
-    private void applyT227Vcore(Activity activity, int microvolts) {
-        if (mT227VcoreChanging) return;
-        mT227VcoreChanging = true;
+    private void applyT227Rail(Activity activity, boolean vsram, int microvolts) {
+        if (mT227RailChanging) return;
+        mT227RailChanging = true;
         updateT227VcoreView();
+        updateT227VsramView();
 
         AsyncTask.THREAD_POOL_EXECUTOR.execute(() -> {
-            T227GPU.VcoreState result = T227GPU.setVcore(microvolts);
-            mT227Vcore = result == null ? T227GPU.readVcore() : result;
+            boolean verified = vsram ? T227GPU.setVsram(microvolts) != null
+                    : T227GPU.setVcore(microvolts) != null;
+            mT227Vcore = T227GPU.readVcore();
+            if (T227GPU.hasVsramControl()) mT227Vsram = T227GPU.readVsram();
             activity.runOnUiThread(() -> {
-                mT227VcoreChanging = false;
+                mT227RailChanging = false;
                 if (!isAdded()) return;
                 updateT227VcoreView();
-                if (result == null) Utils.toast(R.string.t227_gpu_vcore_write_failed, activity);
+                updateT227VsramView();
+                if (!verified) {
+                    Utils.toast(vsram ? R.string.t227_gpu_vsram_write_failed
+                            : R.string.t227_gpu_vcore_write_failed, activity);
+                }
             });
         });
     }
 
     private String formatVcoreVoltage(int microvolts) {
         if (microvolts <= 0) return getString(R.string.t227_gpu_vcore_unavailable);
+        return formatMillivolts(microvolts);
+    }
+
+    private String formatMillivolts(int microvolts) {
         return getString(R.string.t227_gpu_vcore_mv,
                 NumberFormat.getNumberInstance().format(microvolts / 1000.0));
     }
 
     private void updateT227VcoreView() {
         if (mT227VcoreView == null) return;
-        if (mT227VcoreChanging) {
+        if (mT227RailChanging) {
             mT227VcoreView.setSummary(getString(R.string.applying));
             return;
         }
@@ -261,6 +300,32 @@ public class GPUFragment extends RecyclerViewFragment {
         }
         mT227VcoreView.setSummary(getString(R.string.t227_gpu_vcore_readback,
                 formatVcoreVoltage(state.programmedUv), live));
+    }
+
+    private void updateT227VsramView() {
+        if (mT227VsramView == null) return;
+        if (mT227RailChanging) {
+            mT227VsramView.setSummary(getString(R.string.applying));
+            return;
+        }
+        T227GPU.VsramState state = mT227Vsram;
+        if (state == null) {
+            mT227VsramView.setSummary(getString(R.string.t227_gpu_vcore_unavailable));
+            return;
+        }
+        String gap = state.vsramUv > 0 && state.vcoreUv > 0
+                ? formatMillivolts(state.vsramUv - state.vcoreUv)
+                : getString(R.string.t227_gpu_vcore_unavailable);
+        String summary = getString(R.string.t227_gpu_vsram_readback,
+                formatVcoreVoltage(state.vsramUv), gap);
+        if (state.minimumGapUv > 0) {
+            summary += "\n" + getString(R.string.t227_gpu_vsram_min_gap,
+                    formatMillivolts(state.minimumGapUv));
+        }
+        if (state.floorActive) {
+            summary += "\n" + getString(R.string.t227_gpu_vsram_test_active);
+        }
+        mT227VsramView.setSummary(summary);
     }
 
     private void suezGpuInit(List<RecyclerViewItem> items) {
@@ -623,6 +688,7 @@ public class GPUFragment extends RecyclerViewFragment {
             mT227CurrentFrequency = T227GPU.getCurrentFrequency();
             mT227MaximumFrequencyValue = T227GPU.getMaximumFrequency();
             if (mT227VcoreView != null) mT227Vcore = T227GPU.readVcore();
+            if (mT227VsramView != null) mT227Vsram = T227GPU.readVsram();
         }
 
         m2dFreq = mGPUFreq.get2dCurFreq();
@@ -671,6 +737,7 @@ public class GPUFragment extends RecyclerViewFragment {
                         + getString(R.string.mhz));
             }
             updateT227VcoreView();
+            updateT227VsramView();
             return;
         }
 

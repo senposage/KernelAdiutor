@@ -29,11 +29,16 @@ public final class T227GPU {
     private static final String DVFSRC = "/sys/devices/platform/10012000.dvfsrc/helio-dvfsrc";
     private static final String TOP_VCORE = DVFSRC + "/dvfsrc_top_vcore_uv";
     private static final String TOP_VCORE_MAX = DVFSRC + "/dvfsrc_top_vcore_max_uv";
+    private static final String VSRAM_TEST = DVFSRC + "/dvfsrc_vsram_test_uv";
     public static final int VCORE_STOCK_UV = 800000;
+    public static final int VSRAM_STOCK_UV = 900000;
     private static final int VCORE_STEP_UV = 6250;
     private static final Pattern VCORE_INPUT = Pattern.compile("[\\p{Nd}]+(?:\\.[\\p{Nd}]*)?");
     private static final Pattern VCORE_STATE = Pattern.compile(
             "programmed_uv=(\\d+|unavailable)\\s+live_uv=(-?\\d+)\\s+active_gear=(-?\\d+)");
+    private static final Pattern VSRAM_STATE = Pattern.compile(
+            "vsram_uv=(-?\\d+)\\s+vcore_uv=(-?\\d+)\\s+active_gear=-?\\d+\\s+floor_active=([01])"
+                    + "(?:\\s+max_uv=(\\d+)\\s+min_delta_uv=(\\d+))?");
     private static final Pattern FREQUENCY = Pattern.compile("freq\\s*=\\s*(\\d+)");
     private static final Pattern CURRENT = Pattern.compile("g_cur_opp_freq\\s*=\\s*(\\d+)");
     private static final Pattern MAXIMUM = Pattern.compile("max_freq_khz\\s*=\\s*(\\d+)");
@@ -54,6 +59,23 @@ public final class T227GPU {
         }
     }
 
+    public static final class VsramState {
+        public final int vsramUv;
+        public final int vcoreUv;
+        public final boolean floorActive;
+        public final int maxUv;
+        public final int minimumGapUv;
+
+        private VsramState(int vsramUv, int vcoreUv, boolean floorActive, int maxUv,
+                           int minimumGapUv) {
+            this.vsramUv = vsramUv;
+            this.vcoreUv = vcoreUv;
+            this.floorActive = floorActive;
+            this.maxUv = maxUv;
+            this.minimumGapUv = minimumGapUv;
+        }
+    }
+
     private T227GPU() {
     }
 
@@ -64,6 +86,34 @@ public final class T227GPU {
 
     public static boolean hasVcoreControl() {
         return Utils.existFile(TOP_VCORE);
+    }
+
+    public static boolean hasVsramControl() {
+        return Utils.existFile(VSRAM_TEST);
+    }
+
+    public static VsramState readVsram() {
+        return parseVsram(Utils.readFile(VSRAM_TEST));
+    }
+
+    public static VsramState setVsram(int microvolts) {
+        if (!isVcoreStep(microvolts)) return null;
+
+        boolean reset = microvolts == VSRAM_STOCK_UV;
+        int request = reset ? 0 : microvolts;
+        VsramState result = parseVsram(RootUtils.runCommand(
+                Control.write(String.valueOf(request), VSRAM_TEST) + " && cat " + VSRAM_TEST));
+        return result != null && result.vsramUv == microvolts
+                && result.floorActive != reset ? result : null;
+    }
+
+    private static VsramState parseVsram(String readback) {
+        if (readback == null) return null;
+        Matcher match = VSRAM_STATE.matcher(readback.trim());
+        if (!match.matches()) return null;
+        return new VsramState(Utils.strToInt(match.group(1)), Utils.strToInt(match.group(2)),
+                "1".equals(match.group(3)), Utils.strToInt(match.group(4)),
+                Utils.strToInt(match.group(5)));
     }
 
     public static int getVcoreMaxUv() {
