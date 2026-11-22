@@ -135,3 +135,23 @@ zero ZRAM I/O errors.
 - Windows offline debug build and same-signer APK verification passed.
   Local APK E:\KA-T227U-263.apk has SHA-256
   5cc1d0674d195087dd1156e0f19f85aeb4942b2eb33e1cd87744a4cc1ce3dfd8.
+
+
+## T227U shared VCORE in version code 264
+
+- Source commit 23ad547 adds Shared VCORE to the T227U GPU page
+  when the runtime voltage file is present. The picker offers
+  800 mV stock, 806.25, 812.5, 818.75, and 825 mV. The app
+  verifies a write against the programmed command before reporting
+  it and reads the measured rail and active gear separately.
+- The setting is live-only and stays outside Apply on Boot and
+  saved profiles. The normal GPU frequency ceiling keeps its
+  existing persistence behavior.
+- Windows offline debug build and same-signer verification passed.
+  An extracted host check covered missing endpoints, readback
+  parsing, all five choices, a rejected write, a mismatched
+  readback, and restoring the stock command. Kernel build #37
+  independently reported 812.5 mV live at gear 0 under load.
+- Local APK E:\KA-VCORE.apk has SHA-256
+  9143cbdd7bda6ac3c1aee5f1c903f83716ae4d6beb03fe090394d597a154f473.
+  The APK was staged while the tablet was running Asphalt.
