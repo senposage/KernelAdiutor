@@ -225,3 +225,22 @@ zero ZRAM I/O errors.
   Boot replay remains pending hardware validation.
 - Local E:\KA-Rails.apk SHA-256
   2edcbef76ab0fa3879d257ec81edd403ab8a7a94d0b94e79313537f3ccb3c613.
+
+## VCORE offset mode in version code 269
+
+- Source 001009428e7ae940b982de980557d8c521b90762. The Shared
+  VCORE card offers an offset from the stock 800 mV target.
+  It snaps the offset to the nearest 6.25 mV step and sets
+  VSRAM to 100 mV above the resulting VCORE target. Both
+  snapped absolute values are shown before writing.
+- The separate manual VSRAM control can keep extra headroom
+  and lowers VCORE first when necessary. A saved pair remains
+  in the existing absolute-target format for boot replay.
+- The new kernel advertises support for automatic rail staging
+  during suspend. At the higher limit in build #52, +125 mV
+  corresponds to 925 mV VCORE and 1,025 mV VSRAM.
+- Offline build, signed install and the host rail checks
+  passed. Checks covered half-step rounding, the 100 mV gap,
+  manual extra headroom, and the extended voltage pair.
+- Local E:\KA-Offset.apk SHA-256
+  b97935c31c1c840b8ab31df84d57f99c0593a56315b7f18804ad1d8617aac4b2.
