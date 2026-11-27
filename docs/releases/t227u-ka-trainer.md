@@ -42,10 +42,11 @@ clears all volatile checkpoints.
 ## Build
 
 From the KA checkout in WSL, run `sh tools/build_zram_trainer.sh`.
-The script builds an ARM64 helper with the AArch64 GCC cross compiler
-and Zstandard v1.5.7 pinned to `f8745da6ff1ad1e7bab384bd1f9d742439278e99`.
+The script builds an ARM64 helper with the AArch64 GCC cross compiler.
+It uses Zstandard v1.5.7 pinned to `f8745da6ff1ad1e7bab384bd1f9d742439278e99`
+and LZ4 v1.10.0 pinned to `ebb370ca83af193212df4dcbadcc5d87bc0de2f0`.
 Then run `gradlew.bat --offline :app:assembleDebug` on Windows. The
-generated helper and upstream license are embedded in the APK.
+generated helper and both upstream licenses are embedded in the APK.
 
 Local artifact: `E:\KA-Trainer.apk`
 
@@ -257,3 +258,17 @@ zero ZRAM I/O errors.
   this check.
 - E:\KA-Clean.apk and the copy in the tablet's Downloads have SHA-256
   2085e1db9fb22c7caeb7f5005cc4f5619e80330a4b2d10537516b6b193434715.
+
+## LZ4-based dictionary selection in version code 271
+
+- Source d6e51a5cc04b3576bc28306955769d64a0f1e8bf. The helper reserves
+  every eighth page for validation. It trains two FastCover candidates
+  and selects the 16 KiB raw dictionary that produces fewer bytes on
+  those held-out pages using independent LZ4 blocks. The fallback can
+  train from the full capture when the split leaves no usable candidate.
+- The synthetic smoke tests verified exact size, deterministic output,
+  checkpoint equivalence and byte-for-byte round trips. The ARM64 helper
+  produced a 16 KiB dictionary on the tablet. APK 271 installed in place
+  with the existing ZRAM swap and its 16 KiB dictionary still active.
+- E:\KA-Train.apk and the copy in the tablet's Downloads have SHA-256
+  df317f127630c1aaf90be02f8ac9b070776558b86c857e8c78b529a5d3e97138.
