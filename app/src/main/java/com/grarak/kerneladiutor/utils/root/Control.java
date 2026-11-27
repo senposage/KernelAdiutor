@@ -83,17 +83,7 @@ public class Control {
                 Log.i(TAG, "Added to profile: " + id);
                 mProfileCommands.put(id, command);
             } else {
-                Settings settings = new Settings(context);
-                List<Settings.SettingsItem> items = settings.getAllSettings();
-                for (int i = 0; i < items.size(); i++) {
-                    if (items.get(i).getId().equals(id)
-                            && items.get(i).getCategory().equals(category)) {
-                        settings.delete(i);
-                    }
-                }
-                settings.putSetting(category, command, id);
-                settings.commit();
-                Log.i(TAG, "saved " + id);
+                persistSetting(command, category, id, context);
             }
         }
 
@@ -145,6 +135,27 @@ public class Control {
 
     public static void runSetting(String command, String category, String id, Context context) {
         getInstance().run(command, category, id, context);
+    }
+
+    private static void persistSetting(String value, String category, String id, Context context) {
+        Settings settings = new Settings(context);
+        List<Settings.SettingsItem> items = settings.getAllSettings();
+        for (int i = items.size() - 1; i >= 0; i--) {
+            if (id.equals(items.get(i).getId()) && category.equals(items.get(i).getCategory())) {
+                settings.delete(i);
+            }
+        }
+        settings.putSetting(category, value, id);
+        settings.commit();
+        Log.i(TAG, "saved " + id);
+    }
+
+    /** Save a verified target whose boot handler controls when it is written. */
+    public static void saveSetting(String value, String category, String id, Context context) {
+        Control control = getInstance();
+        if (context == null || control.mProfileMode) return;
+        Context app = context.getApplicationContext();
+        control.mExecutor.execute(() -> persistSetting(value, category, id, app));
     }
 
     public static void removeLegacyT227UCpuOnlineSettings(Context context) {

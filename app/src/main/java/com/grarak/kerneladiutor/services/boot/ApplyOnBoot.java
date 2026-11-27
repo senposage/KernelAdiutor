@@ -38,12 +38,14 @@ import com.grarak.kerneladiutor.fragments.ApplyOnBootFragment;
 import com.grarak.kerneladiutor.fragments.kernel.CPUHotplugFragment;
 import com.grarak.kerneladiutor.services.profile.Tile;
 import com.grarak.kerneladiutor.utils.AppSettings;
+import com.grarak.kerneladiutor.utils.Log;
 import com.grarak.kerneladiutor.utils.NotificationId;
 import com.grarak.kerneladiutor.utils.Utils;
 import com.grarak.kerneladiutor.utils.kernel.cpu.CPUFreq;
 import com.grarak.kerneladiutor.utils.kernel.cpu.MSMPerformance;
 import com.grarak.kerneladiutor.utils.kernel.cpu.SuezDVFS;
 import com.grarak.kerneladiutor.utils.kernel.cpu.T227UDVFS;
+import com.grarak.kerneladiutor.utils.kernel.gpu.T227GPU;
 import com.grarak.kerneladiutor.utils.kernel.vm.ZRAM;
 import com.grarak.kerneladiutor.utils.kernel.cpuhotplug.CoreCtl;
 import com.grarak.kerneladiutor.utils.kernel.cpuhotplug.MPDecision;
@@ -201,10 +203,20 @@ public class ApplyOnBoot {
                 List<String> commands = new ArrayList<>();
                 List<Settings.SettingsItem> savedSettings = settings.getAllSettings();
                 String zramBootCommand = null;
+                String gpuRailTargets = null;
+                String gpuClockCommand = null;
                 for (Settings.SettingsItem item : savedSettings) {
                     if (ApplyOnBootFragment.VM.equals(item.getCategory())
                             && ZRAM.isSizeSetting(item.getId())) {
                         zramBootCommand = ZRAM.bootCommand(item.getSetting(), service);
+                    }
+                    if (ApplyOnBootFragment.GPU.equals(item.getCategory())
+                            && Boolean.TRUE.equals(mCategoryEnabled.get(item.getCategory()))) {
+                        if (T227GPU.RAILS_SETTING.equals(item.getId())) {
+                            gpuRailTargets = item.getSetting();
+                        } else if (T227GPU.isMaximumFrequencySetting(item.getId())) {
+                            gpuClockCommand = item.getSetting();
+                        }
                     }
                 }
                 boolean zramQueued = false;
@@ -215,6 +227,11 @@ public class ApplyOnBoot {
                     String id = item.getId();
                     CPUFreq.ApplyCpu applyCpu;
                     if (Boolean.TRUE.equals(mCategoryEnabled.get(category))) {
+                        if (ApplyOnBootFragment.GPU.equals(category)
+                                && (T227GPU.RAILS_SETTING.equals(id) || (gpuRailTargets != null
+                                && T227GPU.isMaximumFrequencySetting(id)))) {
+                            continue;
+                        }
                         if (t227u && ApplyOnBootFragment.CPU.equals(category)
                                 && T227UDVFS.isLegacyOnlineCommand(setting)) {
                             continue;
@@ -267,6 +284,13 @@ public class ApplyOnBoot {
                         synchronized (this) {
                             su.runCommand(command);
                         }
+                    }
+                }
+                if (gpuRailTargets != null) {
+                    if (T227GPU.restoreRails(su, gpuRailTargets)) {
+                        if (gpuClockCommand != null) su.runCommand(gpuClockCommand);
+                    } else {
+                        Log.e(TAG, "T227U GPU rail restore failed. Skipped the saved clock ceiling.");
                     }
                 }
                 for (String script : mCustomControls.keySet()) {

@@ -188,7 +188,7 @@ public class GPUFragment extends RecyclerViewFragment {
             T227GPU.VcoreState state = mT227Vcore;
             if (state == null || !state.canAdjust()) return;
             voltage = state.programmedUv;
-            maxUv = T227GPU.getVcoreMaxUv();
+            maxUv = T227GPU.getVcoreMaxUv(mT227Vsram);
             stockUv = T227GPU.VCORE_STOCK_UV;
             title = R.string.t227_gpu_vcore;
         }
@@ -199,15 +199,18 @@ public class GPUFragment extends RecyclerViewFragment {
         layout.setPadding(padding, padding, padding, padding);
 
         TextView range = new TextView(activity);
-        range.setText(maxUv > 0 ? getString(R.string.t227_gpu_vcore_kernel_limit,
-                formatVcoreVoltage(maxUv)) : getString(R.string.t227_gpu_vcore_input));
+        range.setText(maxUv > 0 ? getString(R.string.t227_gpu_rail_range,
+                formatVcoreVoltage(stockUv), formatVcoreVoltage(maxUv))
+                : getString(R.string.t227_gpu_rail_floor, formatVcoreVoltage(stockUv)));
         layout.addView(range);
 
         AppCompatEditText input = new AppCompatEditText(activity);
         input.setSingleLine();
         input.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
         input.setSelectAllOnFocus(true);
-        input.setText(NumberFormat.getNumberInstance().format(voltage / 1000.0));
+        NumberFormat voltageFormat = NumberFormat.getNumberInstance();
+        voltageFormat.setGroupingUsed(false);
+        input.setText(voltageFormat.format(voltage / 1000.0));
         layout.addView(input);
 
         TextView preview = new TextView(activity);
@@ -222,14 +225,15 @@ public class GPUFragment extends RecyclerViewFragment {
                 .show();
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
             int target = T227GPU.voltageStepAtOrBelow(input.getText().toString());
-            if (target == 0) return;
+            if (target < stockUv || (maxUv > 0 && target > maxUv)) return;
             dialog.dismiss();
             applyT227Rail(activity, vsram, target);
         });
         Runnable refreshPreview = () -> {
             int target = T227GPU.voltageStepAtOrBelow(input.getText().toString());
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(target > 0);
-            preview.setText(target == 0
+            boolean inRange = target >= stockUv && (maxUv <= 0 || target <= maxUv);
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(inRange);
+            preview.setText(!inRange
                     ? getString(R.string.t227_gpu_vcore_invalid)
                     : getString(R.string.t227_gpu_vcore_preview, formatVcoreVoltage(target)));
         };
@@ -256,8 +260,7 @@ public class GPUFragment extends RecyclerViewFragment {
         updateT227VsramView();
 
         AsyncTask.THREAD_POOL_EXECUTOR.execute(() -> {
-            boolean verified = vsram ? T227GPU.setVsram(microvolts) != null
-                    : T227GPU.setVcore(microvolts) != null;
+            boolean verified = T227GPU.setRail(vsram, microvolts, activity);
             mT227Vcore = T227GPU.readVcore();
             if (T227GPU.hasVsramControl()) mT227Vsram = T227GPU.readVsram();
             activity.runOnUiThread(() -> {
@@ -318,12 +321,10 @@ public class GPUFragment extends RecyclerViewFragment {
                 : getString(R.string.t227_gpu_vcore_unavailable);
         String summary = getString(R.string.t227_gpu_vsram_readback,
                 formatVcoreVoltage(state.vsramUv), gap);
-        if (state.minimumGapUv > 0) {
-            summary += "\n" + getString(R.string.t227_gpu_vsram_min_gap,
-                    formatMillivolts(state.minimumGapUv));
-        }
-        if (state.floorActive) {
-            summary += "\n" + getString(R.string.t227_gpu_vsram_test_active);
+        summary += "\n" + getString(R.string.t227_gpu_vsram_min_gap,
+                formatMillivolts(T227GPU.RAIL_GAP_UV));
+        if (state.vsramUv > T227GPU.VSRAM_STOCK_UV) {
+            summary += "\n" + getString(R.string.t227_gpu_vsram_override_active);
         }
         mT227VsramView.setSummary(summary);
     }
