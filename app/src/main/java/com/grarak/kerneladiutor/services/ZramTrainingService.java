@@ -493,10 +493,8 @@ public class ZramTrainingService extends Service {
                 : "The dictionary backend could not build a candidate.");
         if (dictionary.bytes.length != DICTIONARY_BYTES)
             throw new IOException("The trainer returned an incomplete dictionary.");
-        String name = "zram-" + TextUtils.join("-", filenameParts) + "-"
-                + new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US)
-                .format(new Date()) + "-" + UUID.randomUUID().toString().substring(0, 8) + ".dict";
-        saveDictionary(name, dictionary.bytes);
+        String stem = dictionaryStem(filenameParts, new Date());
+        String name = saveDictionary(stem, dictionary.bytes);
         String report = total + " pages · " + dictionary.bytes.length + " B. " + source;
         PreferenceManager.getDefaultSharedPreferences(this).edit()
                 .putString(DICTIONARY_REPORT + name, report).apply();
@@ -537,13 +535,25 @@ public class ZramTrainingService extends Service {
     }
 
     private String shortAppName(String label, String packageName) {
+        if (ANDROID_SYSTEM.equals(packageName)) return "system";
+
         String name = Normalizer.normalize(label, Normalizer.Form.NFKD)
                 .replaceAll("\\p{M}+", "").toLowerCase(Locale.ROOT)
                 .replaceAll("[^a-z0-9]+", "-").replaceAll("^-|-$", "");
         if (name.isEmpty()) {
             name = packageName.substring(packageName.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT);
         }
-        return name.substring(0, Math.min(14, name.length())).replaceAll("-$", "");
+        if (name.length() > 10) {
+            int boundary = name.lastIndexOf('-', 10);
+            name = name.substring(0, boundary >= 4 ? boundary : 10);
+        }
+        return name.replace("-", "");
+    }
+
+    private static String dictionaryStem(List<String> sources, Date timestamp) {
+        String time = new SimpleDateFormat("MM_dd_h_mma", Locale.US)
+                .format(timestamp).toLowerCase(Locale.US);
+        return TextUtils.join("_", sources) + "_" + time;
     }
 
     private int addPages(byte[] batch, int limit, byte[] source, List<byte[]> records,
@@ -564,16 +574,23 @@ public class ZramTrainingService extends Service {
         return added;
     }
 
-    private void saveDictionary(String name, byte[] bytes) throws IOException, InterruptedException {
+    private String saveDictionary(String stem, byte[] bytes) throws IOException, InterruptedException {
         String script = "dir='" + ZRAM.DICTIONARY_DIRECTORY + "'; "
                 + "mkdir -p \"$dir\" 2>/dev/null || dir='" + ZRAM.DICTIONARY_BACKING_DIRECTORY + "'; "
                 + "mkdir -p \"$dir\" || exit 1; umask 077; "
-                + "tmp=\"$dir/." + name + ".tmp\"; dst=\"$dir/" + name + "\"; "
+                + "stem=" + quote(stem) + "; name=\"$stem.dict\"; n=1; "
+                + "tmp=$(mktemp \"$dir/.zram-dict.XXXXXX\") || exit 1; "
                 + "trap 'rm -f \"$tmp\"' EXIT; "
                 + "cat > \"$tmp\" && [ \"$(stat -c %s \"$tmp\")\" = " + bytes.length
-                + " ] && [ ! -e \"$dst\" ] && mv \"$tmp\" \"$dst\"";
-        requireSuccess(runRoot(script, Collections.singletonList(bytes), 32),
-                "Could not save the dictionary in Download/KernelAdiutor.");
+                + " ] || exit 1; "
+                + "while :; do dst=\"$dir/$name\"; "
+                + "if [ ! -e \"$dst\" ] && [ ! -L \"$dst\" ]; then "
+                + "mv -n \"$tmp\" \"$dst\" || exit 1; "
+                + "if [ ! -e \"$tmp\" ]; then printf '%s\\n' \"$name\"; exit 0; fi; fi; "
+                + "n=$((n+1)); name=\"${stem}_$n.dict\"; done";
+        Result saved = runRoot(script, Collections.singletonList(bytes), 96);
+        requireSuccess(saved, "Could not save the dictionary in Download/KernelAdiutor.");
+        return new String(saved.bytes, StandardCharsets.UTF_8).trim();
     }
 
     private static String quote(String value) {

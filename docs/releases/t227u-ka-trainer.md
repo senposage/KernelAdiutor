@@ -23,8 +23,10 @@ progress and has actions to stop sampling, build, or discard the samples.
 After completion it can start another session with the same apps.
 
 Results show dictionary size, total usable pages, and the two largest
-contributors by unique-page count. Candidate filenames include short
-names for those contributors and a unique suffix. All candidates live
+contributors by unique-page count. Candidate filenames use short
+contributor names and a local timestamp, for example
+`asphalt_system_11_27_4_47pm.dict`. A same-minute collision adds a number
+before the extension. All candidates live
 in `Download/KernelAdiutor` beside any existing dictionaries. Tap the
 **LZ4 dictionary** card to choose a file or plain LZ4. The choice takes
 effect the next time KA initializes ZRAM via Apply on Boot or **Apply
