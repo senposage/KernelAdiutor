@@ -244,3 +244,16 @@ zero ZRAM I/O errors.
   manual extra headroom, and the extended voltage pair.
 - Local E:\KA-Offset.apk SHA-256
   b97935c31c1c840b8ab31df84d57f99c0593a56315b7f18804ad1d8617aac4b2.
+
+## Legacy GPU boot cleanup in version code 270
+
+- Source 75a3b435ff72988b0931022bae45f2c624c16878. On kernels with shared VCORE control, KA removes
+  settings for the retired per-bin GPU voltage controls. The boot
+  dispatcher also ignores those setting IDs before running commands.
+- The offline build and host tests passed. On the tablet running
+  build #52, the in-place upgrade and app launch removed one old
+  per-bin entry. The 1,000 mV / 900 mV rail pair and 1,000 MHz
+  ceiling were preserved. The boot profile was not replayed for
+  this check.
+- E:\KA-Clean.apk and the copy in the tablet's Downloads have SHA-256
+  2085e1db9fb22c7caeb7f5005cc4f5619e80330a4b2d10537516b6b193434715.
