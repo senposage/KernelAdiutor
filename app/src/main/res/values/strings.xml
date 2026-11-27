@@ -920,6 +920,9 @@
     <string name="t227_gpu_vsram_readback">Live %1$s\nVSRAM − VCORE %2$s</string>
     <string name="t227_gpu_vsram_min_gap">KA minimum target gap %1$s</string>
     <string name="t227_gpu_vsram_override_active">VSRAM override active · suspend blocked</string>
+    <string name="t227_gpu_vsram_suspend_restore">Stock rails during suspend</string>
+    <string name="t227_gpu_offset_mode">Offset from 800 mV with automatic VSRAM</string>
+    <string name="t227_gpu_offset_preview">VCORE %1$s · VSRAM %2$s</string>
     <string name="t227_gpu_vsram_write_failed">VSRAM change could not be verified</string>
     <string name="t227_gpu_rail_floor">Minimum %1$s</string>
     <string name="t227_gpu_rail_range">Range %1$s to %2$s</string>

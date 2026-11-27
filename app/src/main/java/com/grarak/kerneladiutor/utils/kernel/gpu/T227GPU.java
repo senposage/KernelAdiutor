@@ -14,6 +14,7 @@ import com.grarak.kerneladiutor.utils.root.Control;
 import com.grarak.kerneladiutor.utils.root.RootUtils;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.text.DecimalFormatSymbols;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -31,6 +32,7 @@ public final class T227GPU {
     private static final String TOP_VCORE = DVFSRC + "/dvfsrc_top_vcore_uv";
     private static final String TOP_VCORE_MAX = DVFSRC + "/dvfsrc_top_vcore_max_uv";
     private static final String VSRAM_TEST = DVFSRC + "/dvfsrc_vsram_test_uv";
+    private static final String RAIL_PM = DVFSRC + "/dvfsrc_gpu_rail_pm";
     public static final int VCORE_STOCK_UV = 800000;
     public static final int VSRAM_STOCK_UV = 900000;
     public static final int RAIL_GAP_UV = 100000;
@@ -91,6 +93,12 @@ public final class T227GPU {
         return Utils.existFile(VSRAM_TEST);
     }
 
+    public static boolean restoresRailsAfterSuspend() {
+        if (!Utils.existFile(RAIL_PM)) return false;
+        String value = Utils.readFile(RAIL_PM);
+        return value != null && "1".equals(value.trim());
+    }
+
     public static VsramState readVsram() {
         return parseVsram(Utils.readFile(VSRAM_TEST));
     }
@@ -113,13 +121,34 @@ public final class T227GPU {
     }
 
     public static int voltageStepAtOrBelow(String millivolts) {
+        BigDecimal microvolts = parseMicrovolts(millivolts);
+        if (microvolts == null) return 0;
+        return microvolts.intValue() / VCORE_STEP_UV * VCORE_STEP_UV;
+    }
+
+    public static int voltageFromOffset(String millivolts) {
+        String input = millivolts.trim();
+        if (input.startsWith("+")) input = input.substring(1);
+        BigDecimal offset = parseMicrovolts(input);
+        if (offset == null || offset.compareTo(
+                BigDecimal.valueOf(Integer.MAX_VALUE - VCORE_STOCK_UV)) > 0) return 0;
+        int steps = offset.divide(BigDecimal.valueOf(VCORE_STEP_UV), 0, RoundingMode.HALF_UP)
+                .intValue();
+        return VCORE_STOCK_UV + steps * VCORE_STEP_UV;
+    }
+
+    public static int getOffsetVcoreMaxUv(VsramState vsram) {
+        return vsram != null && vsram.maxUv >= VSRAM_STOCK_UV
+                ? vsram.maxUv - RAIL_GAP_UV : getVcoreMaxUv(vsram);
+    }
+
+    private static BigDecimal parseMicrovolts(String millivolts) {
         char separator = DecimalFormatSymbols.getInstance().getDecimalSeparator();
         String input = millivolts.trim().replace(separator, '.').replace(',', '.');
-        if (!VCORE_INPUT.matcher(input).matches()) return 0;
+        if (!VCORE_INPUT.matcher(input).matches()) return null;
 
         BigDecimal microvolts = new BigDecimal(input).movePointRight(3);
-        if (microvolts.compareTo(BigDecimal.valueOf(Integer.MAX_VALUE)) > 0) return 0;
-        return microvolts.intValue() / VCORE_STEP_UV * VCORE_STEP_UV;
+        return microvolts.compareTo(BigDecimal.valueOf(Integer.MAX_VALUE)) <= 0 ? microvolts : null;
     }
 
     private static boolean isVcoreStep(int microvolts) {
@@ -138,7 +167,8 @@ public final class T227GPU {
                 Utils.strToInt(match.group(2)), Utils.strToInt(match.group(3)));
     }
 
-    public static synchronized boolean setRail(boolean vsram, int targetUv, Context context) {
+    public static synchronized boolean setRail(boolean vsram, boolean offset,
+                                              int targetUv, Context context) {
         RootUtils.SU su = RootUtils.getSU();
         VsramState currentSram = readCurrentVsram(su);
         VcoreState currentCore = parseVcore(su.runCommand("cat " + TOP_VCORE));
@@ -146,6 +176,7 @@ public final class T227GPU {
 
         int sramUv = vsram ? targetUv : currentSram.vsramUv;
         int coreUv = vsram ? Math.min(currentCore.programmedUv, sramUv - RAIL_GAP_UV) : targetUv;
+        if (offset) sramUv = coreUv + RAIL_GAP_UV;
         if (!applyRails(su, currentSram, sramUv, coreUv)) return false;
 
         Control.saveSetting(sramUv + " " + coreUv, ApplyOnBootFragment.GPU, RAILS_SETTING, context);

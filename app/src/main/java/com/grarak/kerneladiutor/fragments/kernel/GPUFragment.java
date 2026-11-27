@@ -26,6 +26,7 @@ import android.support.v7.widget.AppCompatEditText;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
+import android.widget.CheckBox;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -33,6 +34,7 @@ import com.grarak.kerneladiutor.R;
 import com.grarak.kerneladiutor.fragments.ApplyOnBootFragment;
 import com.grarak.kerneladiutor.fragments.BaseFragment;
 import com.grarak.kerneladiutor.fragments.recyclerview.RecyclerViewFragment;
+import com.grarak.kerneladiutor.utils.AppSettings;
 import com.grarak.kerneladiutor.utils.Utils;
 import com.grarak.kerneladiutor.utils.kernel.gpu.AdrenoIdler;
 import com.grarak.kerneladiutor.utils.kernel.gpu.GPUFreq;
@@ -60,6 +62,7 @@ import java.util.List;
  */
 public class GPUFragment extends RecyclerViewFragment {
 
+    private static final String T227_GPU_OFFSET_MODE = "t227_gpu_offset_mode";
     private GPUFreq mGPUFreq;
 
     private XYGraphView m2dCurFreq;
@@ -77,6 +80,7 @@ public class GPUFragment extends RecyclerViewFragment {
     private DescriptionView mT227VsramView;
     private volatile T227GPU.VsramState mT227Vsram;
     private boolean mT227RailChanging;
+    private boolean mT227RestoresRailsAfterSuspend;
     private final List<SuezVoltageView> mSuezVoltageViews = new ArrayList<>();
 
     private PathReaderFragment mGPUGovernorTunableFragment;
@@ -160,6 +164,7 @@ public class GPUFragment extends RecyclerViewFragment {
         mT227VsramView = null;
         if (T227GPU.hasVsramControl()) {
             mT227Vsram = T227GPU.readVsram();
+            mT227RestoresRailsAfterSuspend = T227GPU.restoresRailsAfterSuspend();
             mT227VsramView = new DescriptionView();
             mT227VsramView.setTitle(getString(R.string.t227_gpu_vsram));
             mT227VsramView.setOnItemClickListener(item -> showT227RailInput(true));
@@ -199,10 +204,15 @@ public class GPUFragment extends RecyclerViewFragment {
         layout.setPadding(padding, padding, padding, padding);
 
         TextView range = new TextView(activity);
-        range.setText(maxUv > 0 ? getString(R.string.t227_gpu_rail_range,
-                formatVcoreVoltage(stockUv), formatVcoreVoltage(maxUv))
-                : getString(R.string.t227_gpu_rail_floor, formatVcoreVoltage(stockUv)));
         layout.addView(range);
+
+        CheckBox offset = new CheckBox(activity);
+        if (!vsram) {
+            offset.setText(R.string.t227_gpu_offset_mode);
+            offset.setChecked(AppSettings.getBoolean(T227_GPU_OFFSET_MODE, false, activity));
+            layout.addView(offset);
+        }
+        int offsetMaxUv = vsram ? 0 : T227GPU.getOffsetVcoreMaxUv(mT227Vsram);
 
         AppCompatEditText input = new AppCompatEditText(activity);
         input.setSingleLine();
@@ -210,7 +220,7 @@ public class GPUFragment extends RecyclerViewFragment {
         input.setSelectAllOnFocus(true);
         NumberFormat voltageFormat = NumberFormat.getNumberInstance();
         voltageFormat.setGroupingUsed(false);
-        input.setText(voltageFormat.format(voltage / 1000.0));
+        input.setText(voltageFormat.format((voltage - (offset.isChecked() ? stockUv : 0)) / 1000.0));
         layout.addView(input);
 
         TextView preview = new TextView(activity);
@@ -220,22 +230,35 @@ public class GPUFragment extends RecyclerViewFragment {
                 .setView(layout)
                 .setNegativeButton(R.string.cancel, null)
                 .setNeutralButton(R.string.reset, (d, which) ->
-                        applyT227Rail(activity, vsram, stockUv))
+                        applyT227Rail(activity, vsram, offset.isChecked(), stockUv))
                 .setPositiveButton(R.string.ok, null)
                 .show();
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
-            int target = T227GPU.voltageStepAtOrBelow(input.getText().toString());
-            if (target < stockUv || (maxUv > 0 && target > maxUv)) return;
+            boolean useOffset = offset.isChecked();
+            int target = parseT227RailInput(input.getText().toString(), useOffset);
+            int limit = useOffset ? offsetMaxUv : maxUv;
+            if (target < stockUv || (limit > 0 && target > limit)) return;
             dialog.dismiss();
-            applyT227Rail(activity, vsram, target);
+            applyT227Rail(activity, vsram, useOffset, target);
         });
         Runnable refreshPreview = () -> {
-            int target = T227GPU.voltageStepAtOrBelow(input.getText().toString());
-            boolean inRange = target >= stockUv && (maxUv <= 0 || target <= maxUv);
+            boolean useOffset = offset.isChecked();
+            int limit = useOffset ? offsetMaxUv : maxUv;
+            int inputBase = useOffset ? stockUv : 0;
+            range.setText(limit > 0 ? getString(R.string.t227_gpu_rail_range,
+                    formatMillivolts(stockUv - inputBase), formatMillivolts(limit - inputBase))
+                    : getString(R.string.t227_gpu_rail_floor, formatMillivolts(stockUv - inputBase)));
+            int target = parseT227RailInput(input.getText().toString(), useOffset);
+            boolean inRange = target >= stockUv && (limit <= 0 || target <= limit);
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(inRange);
-            preview.setText(!inRange
-                    ? getString(R.string.t227_gpu_vcore_invalid)
-                    : getString(R.string.t227_gpu_vcore_preview, formatVcoreVoltage(target)));
+            if (!inRange) {
+                preview.setText(R.string.t227_gpu_vcore_invalid);
+            } else if (useOffset) {
+                preview.setText(getString(R.string.t227_gpu_offset_preview,
+                        formatVcoreVoltage(target), formatVcoreVoltage(target + T227GPU.RAIL_GAP_UV)));
+            } else {
+                preview.setText(getString(R.string.t227_gpu_vcore_preview, formatVcoreVoltage(target)));
+            }
         };
         input.addTextChangedListener(new TextWatcher() {
             @Override
@@ -249,18 +272,28 @@ public class GPUFragment extends RecyclerViewFragment {
             @Override
             public void afterTextChanged(Editable editable) {}
         });
+        offset.setOnCheckedChangeListener((button, checked) -> {
+            int target = parseT227RailInput(input.getText().toString(), !checked);
+            if (target < stockUv) target = voltage;
+            input.setText(voltageFormat.format((target - (checked ? stockUv : 0)) / 1000.0));
+            AppSettings.saveBoolean(T227_GPU_OFFSET_MODE, checked, activity);
+        });
         input.requestFocus();
         refreshPreview.run();
     }
 
-    private void applyT227Rail(Activity activity, boolean vsram, int microvolts) {
+    private int parseT227RailInput(String input, boolean offset) {
+        return offset ? T227GPU.voltageFromOffset(input) : T227GPU.voltageStepAtOrBelow(input);
+    }
+
+    private void applyT227Rail(Activity activity, boolean vsram, boolean offset, int microvolts) {
         if (mT227RailChanging) return;
         mT227RailChanging = true;
         updateT227VcoreView();
         updateT227VsramView();
 
         AsyncTask.THREAD_POOL_EXECUTOR.execute(() -> {
-            boolean verified = T227GPU.setRail(vsram, microvolts, activity);
+            boolean verified = T227GPU.setRail(vsram, offset, microvolts, activity);
             mT227Vcore = T227GPU.readVcore();
             if (T227GPU.hasVsramControl()) mT227Vsram = T227GPU.readVsram();
             activity.runOnUiThread(() -> {
@@ -324,7 +357,8 @@ public class GPUFragment extends RecyclerViewFragment {
         summary += "\n" + getString(R.string.t227_gpu_vsram_min_gap,
                 formatMillivolts(T227GPU.RAIL_GAP_UV));
         if (state.vsramUv > T227GPU.VSRAM_STOCK_UV) {
-            summary += "\n" + getString(R.string.t227_gpu_vsram_override_active);
+            summary += "\n" + getString(mT227RestoresRailsAfterSuspend
+                    ? R.string.t227_gpu_vsram_suspend_restore : R.string.t227_gpu_vsram_override_active);
         }
         mT227VsramView.setSummary(summary);
     }
