@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "lz4.h"
 #include "zdict.h"
 
 #define PAGE_BYTES 4096
@@ -17,6 +18,7 @@
 #define MAX_PAGES 2048
 #define MAX_BATCH 128
 #define DICTIONARY_BYTES 16384
+#define VALIDATION_INTERVAL 8
 
 struct range {
     uint64_t first_page;
@@ -175,6 +177,55 @@ static size_t read_samples(unsigned char *samples, size_t expected_pages)
     return fgetc(stdin) == EOF ? expected_pages * PAGE_BYTES : 0;
 }
 
+static int build_candidate(unsigned char *raw, const unsigned char *samples,
+                           size_t pages, unsigned d)
+{
+    size_t sizes[MAX_PAGES];
+    for (size_t i = 0; i < pages; ++i)
+        sizes[i] = PAGE_BYTES;
+    /* fastCover includes a Zstandard header, which LZ4 does not use. */
+    unsigned char dictionary[DICTIONARY_BYTES + 2048];
+    ZDICT_fastCover_params_t options = {
+        .d = d, .f = 17, .steps = 4, .nbThreads = 1, .accel = 1,
+        .splitPoint = 1.0,
+    };
+    size_t length = ZDICT_optimizeTrainFromBuffer_fastCover(
+            dictionary, sizeof(dictionary), samples, sizes, pages, &options);
+    if (ZDICT_isError(length)) {
+        fprintf(stderr, "%s\n", ZDICT_getErrorName(length));
+        return 1;
+    }
+    size_t header = ZDICT_getDictHeaderSize(dictionary, length);
+    if (ZDICT_isError(header) || header >= length)
+        return 1;
+    if (length - header < DICTIONARY_BYTES)
+        return 4;
+    memcpy(raw, dictionary + length - DICTIONARY_BYTES, DICTIONARY_BYTES);
+    return 0;
+}
+
+static size_t score_dictionary(const unsigned char *raw, const unsigned char *pages,
+                               size_t count)
+{
+    LZ4_stream_t prepared, stream;
+    char compressed[LZ4_COMPRESSBOUND(PAGE_BYTES)];
+    size_t total = 0;
+
+    if (LZ4_loadDict(&prepared, (const char *)raw, DICTIONARY_BYTES) != DICTIONARY_BYTES)
+        return SIZE_MAX;
+    for (size_t i = 0; i < count; ++i) {
+        /* ZRAM starts every page with the same prepared dictionary. */
+        memcpy(&stream, &prepared, sizeof(stream));
+        int bytes = LZ4_compress_fast_continue(&stream,
+                (const char *)pages + i * PAGE_BYTES, compressed,
+                PAGE_BYTES, sizeof(compressed), 1);
+        if (bytes <= 0)
+            return SIZE_MAX;
+        total += bytes < PAGE_BYTES ? bytes : PAGE_BYTES;
+    }
+    return total;
+}
+
 static int train(size_t expected_pages)
 {
     if (!can_train())
@@ -188,29 +239,44 @@ static int train(size_t expected_pages)
         free(samples);
         return 1;
     }
-    size_t sizes[MAX_PAGES];
-    for (size_t i = 0; i < pages; ++i)
-        sizes[i] = PAGE_BYTES;
-    /* fastCover includes a Zstandard header, which LZ4 does not use. */
-    unsigned char dictionary[DICTIONARY_BYTES + 2048];
-    ZDICT_fastCover_params_t options = {
-        .d = 8, .f = 17, .steps = 4, .nbThreads = 1, .accel = 1,
-        .splitPoint = 1.0,
-    };
-    size_t length = ZDICT_optimizeTrainFromBuffer_fastCover(
-            dictionary, sizeof(dictionary), samples, sizes, pages, &options);
-    free(samples);
-    if (ZDICT_isError(length)) {
-        fprintf(stderr, "%s\n", ZDICT_getErrorName(length));
+
+    size_t validation_count = pages / VALIDATION_INTERVAL;
+    unsigned char *validation = malloc(validation_count * PAGE_BYTES);
+    if (!validation) {
+        free(samples);
         return 1;
     }
-    size_t header = ZDICT_getDictHeaderSize(dictionary, length);
-    if (ZDICT_isError(header) || header >= length)
-        return 1;
-    if (length - header < DICTIONARY_BYTES)
-        return 4;
-    /* Keep the tail of the trained content that LZ4 would prioritize. */
-    return fwrite(dictionary + length - DICTIONARY_BYTES, DICTIONARY_BYTES, 1, stdout) == 1 &&
+    /* Interleave holdouts so every collection round can contribute. */
+    size_t training_count = 0, reserved = 0;
+    for (size_t i = 0; i < pages; ++i) {
+        const unsigned char *page = samples + i * PAGE_BYTES;
+        if ((i + 1) % VALIDATION_INTERVAL == 0)
+            memcpy(validation + reserved++ * PAGE_BYTES, page, PAGE_BYTES);
+        else
+            memmove(samples + training_count++ * PAGE_BYTES, page, PAGE_BYTES);
+    }
+
+    unsigned char default_dict[DICTIONARY_BYTES], alternative_dict[DICTIONARY_BYTES];
+    int default_status = build_candidate(default_dict, samples, training_count, 8);
+    int alternative_status = build_candidate(alternative_dict, samples, training_count, 6);
+    size_t default_score = default_status ? SIZE_MAX :
+            score_dictionary(default_dict, validation, validation_count);
+    size_t alternative_score = alternative_status ? SIZE_MAX :
+            score_dictionary(alternative_dict, validation, validation_count);
+    int fallback_status = 0;
+    if (default_score == SIZE_MAX && alternative_score == SIZE_MAX) {
+        /* Keep small captures usable when removing the holdout leaves too little data. */
+        memcpy(samples + training_count * PAGE_BYTES, validation,
+                validation_count * PAGE_BYTES);
+        fallback_status = build_candidate(default_dict, samples, pages, 8);
+    }
+    free(samples);
+    free(validation);
+    if (fallback_status)
+        return fallback_status;
+
+    const unsigned char *winner = alternative_score < default_score ? alternative_dict : default_dict;
+    return fwrite(winner, DICTIONARY_BYTES, 1, stdout) == 1 &&
            fflush(stdout) == 0 ? 0 : 1;
 }
 
