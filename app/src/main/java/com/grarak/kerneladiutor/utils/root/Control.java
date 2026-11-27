@@ -26,10 +26,10 @@ import android.content.ServiceConnection;
 import android.os.IBinder;
 
 import com.grarak.kerneladiutor.database.Settings;
-import com.grarak.kerneladiutor.fragments.ApplyOnBootFragment;
 import com.grarak.kerneladiutor.services.monitor.Monitor;
 import com.grarak.kerneladiutor.utils.Log;
 import com.grarak.kerneladiutor.utils.kernel.cpu.T227UDVFS;
+import com.grarak.kerneladiutor.utils.kernel.gpu.T227GPU;
 
 import org.json.JSONException;
 
@@ -158,17 +158,19 @@ public class Control {
         control.mExecutor.execute(() -> persistSetting(value, category, id, app));
     }
 
-    public static void removeLegacyT227UCpuOnlineSettings(Context context) {
+    public static void removeLegacyT227USettings(Context context) {
         Context app = context.getApplicationContext();
         getInstance().mExecutor.execute(() -> {
-            if (!T227UDVFS.supported()) return;
+            boolean cpu = T227UDVFS.supported();
+            boolean gpu = T227GPU.hasVcoreControl();
+            if (!cpu && !gpu) return;
             try {
-                int removed = Settings.removeLegacyT227UCpuOnlineSettings(app, ApplyOnBootFragment.CPU);
+                int removed = Settings.removeLegacyT227USettings(app, cpu, gpu);
                 if (removed > 0) {
-                    Log.i(TAG, "Removed " + removed + " legacy T227U CPU online settings");
+                    Log.i(TAG, "Removed " + removed + " legacy T227U settings");
                 }
             } catch (IOException | JSONException e) {
-                Log.e(TAG, "Could not migrate T227U CPU online settings");
+                Log.e(TAG, "Could not migrate legacy T227U settings");
             }
         });
     }

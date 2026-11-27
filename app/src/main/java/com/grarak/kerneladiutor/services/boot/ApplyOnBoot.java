@@ -76,7 +76,7 @@ public class ApplyOnBoot {
             AppSettings.resetCoreCtlMinCpusBig(service);
         }
 
-        Control.removeLegacyT227UCpuOnlineSettings(service);
+        Control.removeLegacyT227USettings(service);
         boolean enabled = false;
         final Settings settings = new Settings(service);
         Controls controls = new Controls(service);
@@ -221,6 +221,7 @@ public class ApplyOnBoot {
                 }
                 boolean zramQueued = false;
                 boolean t227u = T227UDVFS.supported();
+                boolean sharedVcore = T227GPU.hasVcoreControl();
                 for (Settings.SettingsItem item : savedSettings) {
                     String category = item.getCategory();
                     String setting = item.getSetting();
@@ -228,8 +229,9 @@ public class ApplyOnBoot {
                     CPUFreq.ApplyCpu applyCpu;
                     if (Boolean.TRUE.equals(mCategoryEnabled.get(category))) {
                         if (ApplyOnBootFragment.GPU.equals(category)
-                                && (T227GPU.RAILS_SETTING.equals(id) || (gpuRailTargets != null
-                                && T227GPU.isMaximumFrequencySetting(id)))) {
+                                && (T227GPU.RAILS_SETTING.equals(id)
+                                || (sharedVcore && T227GPU.isLegacyPerBinVoltageSetting(id))
+                                || (gpuRailTargets != null && T227GPU.isMaximumFrequencySetting(id)))) {
                             continue;
                         }
                         if (t227u && ApplyOnBootFragment.CPU.equals(category)

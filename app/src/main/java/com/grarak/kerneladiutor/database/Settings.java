@@ -21,8 +21,10 @@ package com.grarak.kerneladiutor.database;
 
 import android.content.Context;
 
+import com.grarak.kerneladiutor.fragments.ApplyOnBootFragment;
 import com.grarak.kerneladiutor.utils.Utils;
 import com.grarak.kerneladiutor.utils.kernel.cpu.T227UDVFS;
+import com.grarak.kerneladiutor.utils.kernel.gpu.T227GPU;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -81,7 +83,7 @@ public class Settings extends Provider {
     }
 
     /** Runs on the settings writer's executor. Keep the original file on write failure. */
-    public static int removeLegacyT227UCpuOnlineSettings(Context context, String cpuCategory)
+    public static int removeLegacyT227USettings(Context context, boolean cpu, boolean gpu)
             throws IOException, JSONException {
         File settings = new File(context.getFilesDir(), SETTINGS_FILE);
         String text = Utils.readFile(settings.getPath(), false);
@@ -94,9 +96,16 @@ public class Settings extends Provider {
         JSONArray kept = new JSONArray();
         for (int i = 0; i < entries.length(); i++) {
             JSONObject item = entries.optJSONObject(i);
-            if (item != null && cpuCategory.equals(item.optString("category"))
-                    && T227UDVFS.isLegacyOnlineCommand(item.optString("setting"))) {
-                continue;
+            if (item != null) {
+                String category = item.optString("category");
+                if (cpu && ApplyOnBootFragment.CPU.equals(category)
+                        && T227UDVFS.isLegacyOnlineCommand(item.optString("setting"))) {
+                    continue;
+                }
+                if (gpu && ApplyOnBootFragment.GPU.equals(category)
+                        && T227GPU.isLegacyPerBinVoltageSetting(item.optString("id"))) {
+                    continue;
+                }
             }
             kept.put(entries.get(i));
         }

@@ -171,7 +171,7 @@ public class MainActivity extends BaseActivity {
             MainActivity activity = mRefActivity.get();
             if (activity == null) return;
 
-            Control.removeLegacyT227UCpuOnlineSettings(activity);
+            Control.removeLegacyT227USettings(activity);
             Battery.getInstance(activity);
             CPUBoost.getInstance();
 

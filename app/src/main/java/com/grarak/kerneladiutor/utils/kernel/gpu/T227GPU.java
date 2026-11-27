@@ -28,6 +28,7 @@ public final class T227GPU {
     private static final String OPP_DUMP = "/proc/gpufreq/gpufreq_opp_dump";
     private static final String VAR_DUMP = "/proc/gpufreq/gpufreq_var_dump";
     private static final String MAX_FREQ = "/proc/gpufreq/gpufreq_oc_max_freq";
+    private static final String PER_BIN_VOLTAGE = "/proc/gpufreq/gpufreq_oc_opp_voltage";
     private static final String DVFSRC = "/sys/devices/platform/10012000.dvfsrc/helio-dvfsrc";
     private static final String TOP_VCORE = DVFSRC + "/dvfsrc_top_vcore_uv";
     private static final String TOP_VCORE_MAX = DVFSRC + "/dvfsrc_top_vcore_max_uv";
@@ -280,5 +281,9 @@ public final class T227GPU {
 
     public static boolean isMaximumFrequencySetting(String id) {
         return MAX_FREQ.equals(id);
+    }
+
+    public static boolean isLegacyPerBinVoltageSetting(String id) {
+        return id != null && (PER_BIN_VOLTAGE.equals(id) || id.startsWith(PER_BIN_VOLTAGE + ":"));
     }
 }
