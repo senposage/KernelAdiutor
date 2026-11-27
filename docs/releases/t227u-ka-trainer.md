@@ -274,3 +274,14 @@ zero ZRAM I/O errors.
   with the existing ZRAM swap and its 16 KiB dictionary still active.
 - E:\KA-Train.apk and the copy in the tablet's Downloads have SHA-256
   df317f127630c1aaf90be02f8ac9b070776558b86c857e8c78b529a5d3e97138.
+
+## Local timestamped dictionary names in version code 272
+
+- Source 1c42016d1235350f3ce0650f7b94b99af174efc0. New dictionaries
+  use a name such as asphalt_system_11_27_4_47pm.dict. A same-minute
+  collision adds _2, _3 and so on. Reports use the assigned filename.
+- The host tests checked compact labels, local time formatting,
+  same-minute collision handling and both saved files' contents.
+  The offline APK build and the Downloads copy checksum passed.
+- E:\KA-Names.apk and the tablet copy have SHA-256
+  9a7000a4157c3603f2b2611a890d04d4e62421386faa36d9c61387162d31b3ad.
