@@ -207,3 +207,21 @@ zero ZRAM I/O errors.
   c8545b58a71d8e6cda89b5eae9b70ddd4f4352a57a202bad6ca49fbe6d2ba5fc.
   The kernel owns the rail limit. The 75 mV minimum is introduced
   in build #42.
+
+## GPU rail boot restore in version code 268
+
+- Source 1d26cccf87b548e5da86eeaa2c43c97a3648589c. The verified
+  Shared VSRAM and Shared VCORE targets are saved together.
+  KA 267 did not record those writes in its GPU boot settings.
+  Apply a rail value once after upgrading to save the pair.
+- KA restores a raised VSRAM first and lowers VCORE before
+  reducing VSRAM. A saved GPU clock ceiling runs after the pair
+  verifies. The floors are 900 mV VSRAM and 800 mV VCORE, with
+  a minimum 100 mV between programmed targets. Live VCORE
+  remains a separate reading.
+- The host harness checked ordering, persistence, the stock
+  floors and gap, transient readback, and write failure. The
+  offline build, matching signature, and in-place install passed.
+  Boot replay remains pending hardware validation.
+- Local E:\KA-Rails.apk SHA-256
+  2edcbef76ab0fa3879d257ec81edd403ab8a7a94d0b94e79313537f3ccb3c613.
